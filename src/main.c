@@ -64,7 +64,6 @@
 
  */
 
-
 #define u32 long
 #define fixedpoint int
 #define NRSAMPLES (1024)
@@ -95,7 +94,7 @@
 
 int latestSample = 0;		// most recent sample value
 int signal[NRSAMPLES];		// current sample signal
-int signal_lowfreq[NRSAMPLES];// current sample signal, with a lower samplin frequency (see LOWFREQDIV)
+uint16_t signal_lowfreq[NRSAMPLES];	// current sample signal, with a lower samplin frequency (see LOWFREQDIV)
 int freqs[FREQS];		// frequencies for each band/filter
 u32 lowfreq_endIndex = 0;// index stating which frequency filters use low frequency samplin
 u32 amplitude;
@@ -109,34 +108,34 @@ unsigned fixedpoint twoPiQ;	// 2*pi*Q value for the CQT (Constant Q Transform)
 int band_it;
 
 int fp_abs(int in) {
-    fixedpoint mask = in >> 31;
-    return (mask + in) ^ mask;
+	fixedpoint mask = in >> 31;
+	return (mask + in) ^ mask;
 }
 
 int approxSin(int x) {
-    // S(x) = x * ( (3<<p) - (x*x>>r) ) >> s
-    // n : Q-pos for quarter circle             11, so full circle is 2^13 long
-    // A : Q-pos for output                     10
-    // p : Q-pos for parentheses intermediate   15
-    // r = 2n-p                                  7
-    // s = A-1-p-n                              17
+	// S(x) = x * ( (3<<p) - (x*x>>r) ) >> s
+	// n : Q-pos for quarter circle             11, so full circle is 2^13 long
+	// A : Q-pos for output                     10
+	// p : Q-pos for parentheses intermediate   15
+	// r = 2n-p                                  7
+	// s = A-1-p-n                              17
 
-    x = x << (30 - qN);		// resize to pi range
-    // shift to full s32 range (Q13->Q30)
+	x = x << (30 - qN);		// resize to pi range
+	// shift to full s32 range (Q13->Q30)
 
-    if ((x ^ (x << 1)) < 0)	// test for quadrant 1 or 2
-       x = (1 << 31) - x;
+	if ((x ^ (x << 1)) < 0)	// test for quadrant 1 or 2
+		x = (1 << 31) - x;
 
-   x = x >> (30 - qN);
-   return (x * ((3 << qP) - (x * x >> qR)) >> qS);
+	x = x >> (30 - qN);
+	return (x * ((3 << qP) - (x * x >> qR)) >> qS);
 }
 
 fixedpoint approxCos(fixedpoint in) {
-    return approxSin((int2PI >> 2) - in);
+	return approxSin((int2PI >> 2) - in);
 }
 
 fixedpoint hamming(int m, int k) {
-    return ALPHA - (BETA * approxCos(int2PI * m / NFreq[k]) >> PRECISION);
+	return ALPHA - (BETA * approxCos(int2PI * m / NFreq[k]) >> PRECISION);
 }
 
 void cqt() {
@@ -158,7 +157,9 @@ void cqt() {
 
 		real_f = real / (float) SCALE;
 		imag_f = imag / (float) SCALE;
-		freqs[k] = logf(powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)* amplitude / 32;
+		freqs[k] = logf(
+				powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)
+				* amplitude / 32;
 	}
 	for (; k < FREQS; ++k) {
 		indx = nrInterrupts % NRSAMPLES - 1 + 8 * NRSAMPLES;
@@ -173,15 +174,12 @@ void cqt() {
 		real_f = real / (float) SCALE;
 		imag_f = imag / (float) SCALE;
 
-
-
-		freqs[k] = logf(powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)* amplitude / 32;
+		freqs[k] = logf(
+				powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)
+				* amplitude / 32;
 	}
 }
 //////////////////////////////CONSTANT Q TRANSFORM //////////////////////////
-
-
-
 
 char* itoa(int value, char* result, int base) {
 	// check that the base if valid
@@ -196,7 +194,9 @@ char* itoa(int value, char* result, int base) {
 	do {
 		tmp_value = value;
 		value /= base;
-		*ptr++ ="zyxwvutsrqponmlkjihgfedcba9876543210123456789abcdefghijklmnopqrstuvwxyz"[35 + (tmp_value - value * base)];
+		*ptr++ =
+				"zyxwvutsrqponmlkjihgfedcba9876543210123456789abcdefghijklmnopqrstuvwxyz"[35
+						+ (tmp_value - value * base)];
 	} while (value);
 
 	// Apply negative sign
@@ -230,7 +230,6 @@ int main(void) {
 	digitalConfig(TEC2, INPUT);
 	digitalConfig(TEC3, INPUT);
 	digitalConfig(TEC4, INPUT);
-
 	/* Configuración de pines de salida para Leds de la CIAA-NXP */
 	digitalConfig(LEDR, OUTPUT);
 	digitalConfig(LEDG, OUTPUT);
@@ -242,6 +241,7 @@ int main(void) {
 	/* Inicializar UART_USB a 115200 baudios */
 	uartConfig(UART_USB, 115200);
 
+	uint16_t muestras[NRSAMPLES];
 	/* Inicializar AnalogIO */
 	/* Posibles configuraciones:
 	 *    ENABLE_ANALOG_INPUTS,  DISABLE_ANALOG_INPUTS,
@@ -250,11 +250,19 @@ int main(void) {
 	analogConfig(ENABLE_ANALOG_INPUTS); /* ADC */
 	analogConfig(ENABLE_ANALOG_OUTPUTS); /* DAC */
 
+	/*
+	 * Configurar frecuencia de muestreo ( f sample ) del ADC
+	 * al maximo (400.000 muestras
+	 *
+	 */
+	ADC_CLOCK_SETUP_T ADCSetup;
+	Chip_ADC_SetSampleRate(LPC_ADC0, &ADCSetup, ADC_MAX_SAMPLE_RATE);
+
 	/* Configuración de estado inicial del Led */
 	bool_t ledState1 = OFF;
 
 	/* Contador */
-	uint32_t i = 0;
+	uint16_t i = 0;
 
 	/* Buffer */
 	static uint8_t uartBuff[10];
@@ -266,15 +274,42 @@ int main(void) {
 	/* Variables de delays no bloqueantes */
 	delay_t delay1;
 	delay_t delay2;
+	delay_t delay3;
 
 	/* Inicializar Retardo no bloqueante con tiempo en ms */
-	delayConfig(&delay1, 10);
+	delayConfig(&delay1, 60);
 	delayConfig(&delay2, 200);
+	delayConfig(&delay3, 10);
 
 	/* ------------- REPETIR POR SIEMPRE ------------- */
 	while (1) {
 
+		if (delayRead(&delay3)) {
+			for (uint16_t z = 0; z < 1023; z++) {
+
+				signal[z] = (uint16_t) analogRead(AI0);
+				//i=z;
+				//itoa(i, uartBuff, 10);
+				//uartWriteString(UART_USB, uartBuff);
+				//uartWriteString(UART_USB, (uint8_t*) ";\r\n");
+
+			}
+
+			uartWriteString(UART_USB, (uint8_t*) "FIN DE MUESTREO");
+			uartWriteString(UART_USB, (uint8_t*) ";\r\n");
+			cqt();
+			uartWriteString(UART_USB, (uint8_t*) "CQT");
+			uartWriteString(UART_USB, (uint8_t*) ";\r\n");
+			for (uint16_t z = 0; z < 1023; z++) {
+				itoa(freqs[z], uartBuff, 10);
+				uartWriteString(UART_USB, uartBuff);
+				uartWriteString(UART_USB, (uint8_t*) ";\r\n");
+			}
+
+		}
+
 		/* delayRead retorna TRUE cuando se cumple el tiempo de retardo */
+
 		if (delayRead(&delay1)) {
 
 			/* Leo la Entrada Analogica AI0 - ADC0 CH1 */
@@ -282,18 +317,18 @@ int main(void) {
 
 			/* Envío la primer parte del mnesaje a la Uart */
 			//uartWriteString(UART_USB, (uint8_t*) "AI0 value: ");
-			int pepe = powf(2,4);
-			caso = (muestra < 256) ? 0 : (muestra >= 256 && muestra < 512) ? 1 :(muestra >= 512 && muestra < 768) ? 2 : 3;
+			caso = (muestra < 256) ? 0 : (muestra >= 256 && muestra < 512) ? 1 :
+					(muestra >= 512 && muestra < 768) ? 2 : 3;
 
 			switch (caso) {
 			case 0: {
-				cqt();
 				digitalWrite(LEDR, ON);
 				digitalWrite(LEDG, ON);
 				digitalWrite(LEDB, ON);
 				digitalWrite(LED1, OFF);
 				digitalWrite(LED2, OFF);
 				digitalWrite(LED3, OFF);
+
 				break;
 			}
 
@@ -304,6 +339,7 @@ int main(void) {
 				digitalWrite(LED1, ON);
 				digitalWrite(LED2, OFF);
 				digitalWrite(LED3, OFF);
+
 				break;
 
 			case 2:
@@ -313,6 +349,7 @@ int main(void) {
 				digitalWrite(LED1, OFF);
 				digitalWrite(LED2, ON);
 				digitalWrite(LED3, OFF);
+
 				break;
 
 			case 3:
@@ -322,16 +359,15 @@ int main(void) {
 				digitalWrite(LED1, OFF);
 				digitalWrite(LED2, OFF);
 				digitalWrite(LED3, ON);
+
 				break;
 			}
 
 			/* Conversión de muestra entera a ascii con base decimal */
 			//itoa(muestra, uartBuff, 10); /* 10 significa decimal */
-
 			/* Enviar muestra y Enter */
 			//uartWriteString(UART_USB, uartBuff);
 			//uartWriteString(UART_USB, (uint8_t*) ";\r\n");
-
 			/* Escribo la muestra en la Salida AnalogicaAO - DAC */
 			//analogWrite(AO, muestra);
 		}
@@ -349,7 +385,6 @@ int main(void) {
 //			if (i == 20)
 //				delayWrite(&delay2, 1000);
 //		}
-
 	}
 
 	/* NO DEBE LLEGAR NUNCA AQUI, debido a que a este programa no es llamado
