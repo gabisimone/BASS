@@ -38,12 +38,14 @@
 /*==================[inclusions]=============================================*/
 
 #include "main.h"         /* <= own header */
-#include "math.h"
+#include <math.h>
 #include "sAPI.h"         /* <= sAPI header */
+#include <mef.h>
+#include <fft_kb.h>
 
 /*==================[macros and definitions]=================================*/
 
-#define forsn(i,s,n) for(i=(s);i<(n);i++)
+#define forsn(i,s,n) for(i=(s);i<(n);i++){}
 #define forn (i,n) forsn(i,0,n)
 /*==================[internal data declaration]==============================*/
 
@@ -57,15 +59,9 @@
 
 /*==================[external functions definition]==========================*/
 
-/**
- * C++ version 0.4 char* style "itoa":
- * Written by Lukás Chmela
- * Released under GPLv3.
 
- */
 
 #define u32 long
-#define fixedpoint int
 #define NRSAMPLES (1024)
 #define LOWFREQDIV 8
 #define fixedpoint int
@@ -82,27 +78,32 @@
 #define ALPHA ((7<<PRECISION)/13)	// 0.53836*(1<<PRECISION)
 #define BETA ((6<<PRECISION)/13)	// 1-0.53836*(1<<PRECISION)
 #define MEM 3			// the number of memorized old sampling values, should always be odd
-#define FREQS 16
-#define FSAMPLE 14200
-#define lowFreqBound 20
-#define highFreqBound 7000
+#define FREQSBands 8
+#define FSAMPLE 400000
+#define lowFreqBound 44
+#define highFreqBound 11360
 #define refreshRate 80
 #define MAXCYCLE (FSAMPLE/16/refreshRate)
-// so with a decay of 1, every 1<<DECAYPRECISION th frame the height is lowered by 1
-#define DECAYPRECISION 10
+
+#define DECAYPRECISION 10				// so with a decay of 1, every 1<<DECAYPRECISION th frame the height is lowered by 1
 #define REDUNDANCY 11
 
-int latestSample = 0;		// most recent sample value
-int signal[NRSAMPLES];		// current sample signal
-uint16_t signal_lowfreq[NRSAMPLES];	// current sample signal, with a lower samplin frequency (see LOWFREQDIV)
-int freqs[FREQS];		// frequencies for each band/filter
-u32 lowfreq_endIndex = 0;// index stating which frequency filters use low frequency samplin
+int latestSample = 0;						// most recent sample value
+int signal[NRSAMPLES];
+int test[NRSAMPLES];// current sample signal
+uint16_t signal_lowfreq[NRSAMPLES];			// current sample signal, with a lower sampling frequency (see LOWFREQDIV)
+int freqs[FREQSBands];						// frequencies for each band/filter
+u32 lowfreq_endIndex = 0;					// index stating which frequency filters use low frequency sampling
 u32 amplitude;
-unsigned int nrInterrupts, nrInterruptsSinceEffectChange,
-		nrInterruptsSinceSignal;	// interruptcounters
-unsigned int Freq[FREQS + 1];// lower and upper frequency for each filter/band
-unsigned int Div[FREQS];	// sample frequency divider for each filter
-unsigned int NFreq[FREQS];	// number of samples needed for each filter
+
+unsigned int nrInterrupts, nrInterruptsSinceEffectChange, nrInterruptsSinceSignal;	// interrupt counters
+
+unsigned int Freq[FREQSBands + 1];// lower and upper frequency for each filter/band
+
+unsigned int Div[FREQSBands];	// sample frequency divider for each filter
+
+unsigned int NFreq[FREQSBands];	// number of samples needed for each filter
+
 unsigned fixedpoint twoPiQ;	// 2*pi*Q value for the CQT (Constant Q Transform)
 
 int band_it;
@@ -157,11 +158,9 @@ void cqt() {
 
 		real_f = real / (float) SCALE;
 		imag_f = imag / (float) SCALE;
-		freqs[k] = logf(
-				powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)
-				* amplitude / 32;
+		freqs[k] = logf(powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1) * amplitude / 32;
 	}
-	for (; k < FREQS; ++k) {
+	for (; k < FREQSBands; ++k) {
 		indx = nrInterrupts % NRSAMPLES - 1 + 8 * NRSAMPLES;
 		real = ALPHA - (BETA * signal[indx % NRSAMPLES] >> PRECISION);
 		imag = 0;
@@ -174,9 +173,7 @@ void cqt() {
 		real_f = real / (float) SCALE;
 		imag_f = imag / (float) SCALE;
 
-		freqs[k] = logf(
-				powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)
-				* amplitude / 32;
+		freqs[k] = logf(powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)	* amplitude / 32;
 	}
 }
 //////////////////////////////CONSTANT Q TRANSFORM //////////////////////////
@@ -194,9 +191,7 @@ char* itoa(int value, char* result, int base) {
 	do {
 		tmp_value = value;
 		value /= base;
-		*ptr++ =
-				"zyxwvutsrqponmlkjihgfedcba9876543210123456789abcdefghijklmnopqrstuvwxyz"[35
-						+ (tmp_value - value * base)];
+		*ptr++ ="zyxwvutsrqponmlkjihgfedcba9876543210123456789abcdefghijklmnopqrstuvwxyz"[35+ (tmp_value - value * base)];
 	} while (value);
 
 	// Apply negative sign
@@ -223,20 +218,20 @@ int main(void) {
 	tickConfig(1, 0);
 
 	/* Inicializar DigitalIO */
-	digitalConfig(0, ENABLE_DIGITAL_IO);
+	gpioConfig(0,GPIO_ENABLE);
 
 	/* Configuración de pines de entrada para Teclas de la CIAA-NXP */
-	digitalConfig(TEC1, INPUT);
-	digitalConfig(TEC2, INPUT);
-	digitalConfig(TEC3, INPUT);
-	digitalConfig(TEC4, INPUT);
+	gpioConfig(TEC1, INPUT);
+	gpioConfig(TEC2, INPUT);
+	gpioConfig(TEC3, INPUT);
+	gpioConfig(TEC4, INPUT);
 	/* Configuración de pines de salida para Leds de la CIAA-NXP */
-	digitalConfig(LEDR, OUTPUT);
-	digitalConfig(LEDG, OUTPUT);
-	digitalConfig(LEDB, OUTPUT);
-	digitalConfig(LED1, OUTPUT);
-	digitalConfig(LED2, OUTPUT);
-	digitalConfig(LED3, OUTPUT);
+	gpioConfig(LEDR, OUTPUT);
+	gpioConfig(LEDG, OUTPUT);
+	gpioConfig(LEDB, OUTPUT);
+	gpioConfig(LED1, OUTPUT);
+	gpioConfig(LED2, OUTPUT);
+	gpioConfig(LED3, OUTPUT);
 
 	/* Inicializar UART_USB a 115200 baudios */
 	uartConfig(UART_USB, 115200);
@@ -247,8 +242,8 @@ int main(void) {
 	 *    ENABLE_ANALOG_INPUTS,  DISABLE_ANALOG_INPUTS,
 	 *    ENABLE_ANALOG_OUTPUTS, DISABLE_ANALOG_OUTPUTS
 	 */
-	analogConfig(ENABLE_ANALOG_INPUTS); /* ADC */
-	analogConfig(ENABLE_ANALOG_OUTPUTS); /* DAC */
+	adcConfig(ADC_ENABLE); /* ADC */
+	dacConfig(DAC_ENABLE); /* DAC */
 
 	/*
 	 * Configurar frecuencia de muestreo ( f sample ) del ADC
@@ -279,32 +274,28 @@ int main(void) {
 	/* Inicializar Retardo no bloqueante con tiempo en ms */
 	delayConfig(&delay1, 60);
 	delayConfig(&delay2, 200);
-	delayConfig(&delay3, 10);
+	delayConfig(&delay3, 5);
+
+	uint8_t* num=0;
 
 	/* ------------- REPETIR POR SIEMPRE ------------- */
 	while (1) {
-
 		if (delayRead(&delay3)) {
-			for (uint16_t z = 0; z < 1023; z++) {
+			uint16_t z = 0;
+			for (; z < 1023; z++) {
 
-				signal[z] = (uint16_t) analogRead(AI0);
-				//i=z;
-				//itoa(i, uartBuff, 10);
-				//uartWriteString(UART_USB, uartBuff);
-				//uartWriteString(UART_USB, (uint8_t*) ";\r\n");
+				signal[z] = (uint16_t) adcRead(AI0);
+
 
 			}
+			num++;
+			uartWriteString(UART_USB, (uint8_t*) "Fin de muestreo:   ");
+			itoa(num, uartBuff, 10); /* 10 significa decimal */
 
-			uartWriteString(UART_USB, (uint8_t*) "FIN DE MUESTREO");
-			uartWriteString(UART_USB, (uint8_t*) ";\r\n");
-			cqt();
-			uartWriteString(UART_USB, (uint8_t*) "CQT");
-			uartWriteString(UART_USB, (uint8_t*) ";\r\n");
-			for (uint16_t z = 0; z < 1023; z++) {
-				itoa(freqs[z], uartBuff, 10);
-				uartWriteString(UART_USB, uartBuff);
-				uartWriteString(UART_USB, (uint8_t*) ";\r\n");
-			}
+			uartWriteString(UART_USB, uartBuff);
+			uartWriteString(UART_USB, (uint8_t*) " \r\n ");
+
+			
 
 		}
 
@@ -312,53 +303,52 @@ int main(void) {
 
 		if (delayRead(&delay1)) {
 
-			/* Leo la Entrada Analogica AI0 - ADC0 CH1 */
-			muestra = analogRead(AI0);
+			/* Leo la Entrada Analogica AI0 - ADC0 CH 1 */
+			muestra = adcRead(AI0);
 
 			/* Envío la primer parte del mnesaje a la Uart */
 			//uartWriteString(UART_USB, (uint8_t*) "AI0 value: ");
-			caso = (muestra < 256) ? 0 : (muestra >= 256 && muestra < 512) ? 1 :
-					(muestra >= 512 && muestra < 768) ? 2 : 3;
+			caso = (muestra < 256) ? 0 : (muestra >= 256 && muestra < 512) ? 1 :(muestra >= 512 && muestra < 768) ? 2 : 3;
 
 			switch (caso) {
 			case 0: {
-				digitalWrite(LEDR, ON);
-				digitalWrite(LEDG, ON);
-				digitalWrite(LEDB, ON);
-				digitalWrite(LED1, OFF);
-				digitalWrite(LED2, OFF);
-				digitalWrite(LED3, OFF);
+				gpioWrite(LEDR, ON);
+				gpioWrite(LEDG, ON);
+				gpioWrite(LEDB, ON);
+				gpioWrite(LED1, OFF);
+				gpioWrite(LED2, OFF);
+				gpioWrite(LED3, OFF);
 
 				break;
 			}
 
 			case 1:
-				digitalWrite(LEDR, OFF);
-				digitalWrite(LEDG, OFF);
-				digitalWrite(LEDB, OFF);
-				digitalWrite(LED1, ON);
-				digitalWrite(LED2, OFF);
-				digitalWrite(LED3, OFF);
+				gpioWrite(LEDR, OFF);
+				gpioWrite(LEDG, OFF);
+				gpioWrite(LEDB, OFF);
+				gpioWrite(LED1, ON);
+				gpioWrite(LED2, OFF);
+				gpioWrite(LED3, OFF);
 
 				break;
 
 			case 2:
-				digitalWrite(LEDR, OFF);
-				digitalWrite(LEDG, OFF);
-				digitalWrite(LEDB, OFF);
-				digitalWrite(LED1, OFF);
-				digitalWrite(LED2, ON);
-				digitalWrite(LED3, OFF);
+				gpioWrite(LEDR, OFF);
+				gpioWrite(LEDG, OFF);
+				gpioWrite(LEDB, OFF);
+				gpioWrite(LED1, OFF);
+				gpioWrite(LED2, ON);
+				gpioWrite(LED3, OFF);
 
 				break;
 
 			case 3:
-				digitalWrite(LEDR, OFF);
-				digitalWrite(LEDG, OFF);
-				digitalWrite(LEDB, OFF);
-				digitalWrite(LED1, OFF);
-				digitalWrite(LED2, OFF);
-				digitalWrite(LED3, ON);
+				gpioWrite(LEDR, OFF);
+				gpioWrite(LEDG, OFF);
+				gpioWrite(LEDB, OFF);
+				gpioWrite(LED1, OFF);
+				gpioWrite(LED2, OFF);
+				gpioWrite(LED3, ON);
 
 				break;
 			}
@@ -378,7 +368,7 @@ int main(void) {
 //				ledState1 = OFF;
 //			else
 //				ledState1 = ON;
-//			digitalWrite(LED1, ledState1);
+//			gpioWrite(LED1, ledState1);
 //
 //			/* Si pasaron 20 delays le aumento el tiempo */
 //			i++;
