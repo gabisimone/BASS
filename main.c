@@ -218,20 +218,20 @@ int main(void) {
 	tickConfig(1, 0);
 
 	/* Inicializar DigitalIO */
-	digitalConfig(0, ENABLE_DIGITAL_IO);
+	gpioConfig(0,GPIO_ENABLE);
 
 	/* Configuración de pines de entrada para Teclas de la CIAA-NXP */
-	digitalConfig(TEC1, INPUT);
-	digitalConfig(TEC2, INPUT);
-	digitalConfig(TEC3, INPUT);
-	digitalConfig(TEC4, INPUT);
+	gpioConfig(TEC1, INPUT);
+	gpioConfig(TEC2, INPUT);
+	gpioConfig(TEC3, INPUT);
+	gpioConfig(TEC4, INPUT);
 	/* Configuración de pines de salida para Leds de la CIAA-NXP */
-	digitalConfig(LEDR, OUTPUT);
-	digitalConfig(LEDG, OUTPUT);
-	digitalConfig(LEDB, OUTPUT);
-	digitalConfig(LED1, OUTPUT);
-	digitalConfig(LED2, OUTPUT);
-	digitalConfig(LED3, OUTPUT);
+	gpioConfig(LEDR, OUTPUT);
+	gpioConfig(LEDG, OUTPUT);
+	gpioConfig(LEDB, OUTPUT);
+	gpioConfig(LED1, OUTPUT);
+	gpioConfig(LED2, OUTPUT);
+	gpioConfig(LED3, OUTPUT);
 
 	/* Inicializar UART_USB a 115200 baudios */
 	uartConfig(UART_USB, 115200);
@@ -242,8 +242,8 @@ int main(void) {
 	 *    ENABLE_ANALOG_INPUTS,  DISABLE_ANALOG_INPUTS,
 	 *    ENABLE_ANALOG_OUTPUTS, DISABLE_ANALOG_OUTPUTS
 	 */
-	analogConfig(ENABLE_ANALOG_INPUTS); /* ADC */
-	analogConfig(ENABLE_ANALOG_OUTPUTS); /* DAC */
+	adcConfig(ADC_ENABLE); /* ADC */
+	dacConfig(DAC_ENABLE); /* DAC */
 
 	/*
 	 * Configurar frecuencia de muestreo ( f sample ) del ADC
@@ -281,9 +281,10 @@ int main(void) {
 	/* ------------- REPETIR POR SIEMPRE ------------- */
 	while (1) {
 		if (delayRead(&delay3)) {
-			for (uint16_t z = 0; z < 1023; z++) {
+			uint16_t z = 0;
+			for (; z < 1023; z++) {
 
-				signal[z] = (uint16_t) analogRead(AI0);
+				signal[z] = (uint16_t) adcRead(AI0);
 
 
 			}
@@ -303,52 +304,51 @@ int main(void) {
 		if (delayRead(&delay1)) {
 
 			/* Leo la Entrada Analogica AI0 - ADC0 CH 1 */
-			muestra = analogRead(AI0);
+			muestra = adcRead(AI0);
 
 			/* Envío la primer parte del mnesaje a la Uart */
 			//uartWriteString(UART_USB, (uint8_t*) "AI0 value: ");
-			caso = (muestra < 256) ? 0 : (muestra >= 256 && muestra < 512) ? 1 :
-					(muestra >= 512 && muestra < 768) ? 2 : 3;
+			caso = (muestra < 256) ? 0 : (muestra >= 256 && muestra < 512) ? 1 :(muestra >= 512 && muestra < 768) ? 2 : 3;
 
 			switch (caso) {
 			case 0: {
-				digitalWrite(LEDR, ON);
-				digitalWrite(LEDG, ON);
-				digitalWrite(LEDB, ON);
-				digitalWrite(LED1, OFF);
-				digitalWrite(LED2, OFF);
-				digitalWrite(LED3, OFF);
+				gpioWrite(LEDR, ON);
+				gpioWrite(LEDG, ON);
+				gpioWrite(LEDB, ON);
+				gpioWrite(LED1, OFF);
+				gpioWrite(LED2, OFF);
+				gpioWrite(LED3, OFF);
 
 				break;
 			}
 
 			case 1:
-				digitalWrite(LEDR, OFF);
-				digitalWrite(LEDG, OFF);
-				digitalWrite(LEDB, OFF);
-				digitalWrite(LED1, ON);
-				digitalWrite(LED2, OFF);
-				digitalWrite(LED3, OFF);
+				gpioWrite(LEDR, OFF);
+				gpioWrite(LEDG, OFF);
+				gpioWrite(LEDB, OFF);
+				gpioWrite(LED1, ON);
+				gpioWrite(LED2, OFF);
+				gpioWrite(LED3, OFF);
 
 				break;
 
 			case 2:
-				digitalWrite(LEDR, OFF);
-				digitalWrite(LEDG, OFF);
-				digitalWrite(LEDB, OFF);
-				digitalWrite(LED1, OFF);
-				digitalWrite(LED2, ON);
-				digitalWrite(LED3, OFF);
+				gpioWrite(LEDR, OFF);
+				gpioWrite(LEDG, OFF);
+				gpioWrite(LEDB, OFF);
+				gpioWrite(LED1, OFF);
+				gpioWrite(LED2, ON);
+				gpioWrite(LED3, OFF);
 
 				break;
 
 			case 3:
-				digitalWrite(LEDR, OFF);
-				digitalWrite(LEDG, OFF);
-				digitalWrite(LEDB, OFF);
-				digitalWrite(LED1, OFF);
-				digitalWrite(LED2, OFF);
-				digitalWrite(LED3, ON);
+				gpioWrite(LEDR, OFF);
+				gpioWrite(LEDG, OFF);
+				gpioWrite(LEDB, OFF);
+				gpioWrite(LED1, OFF);
+				gpioWrite(LED2, OFF);
+				gpioWrite(LED3, ON);
 
 				break;
 			}
@@ -368,7 +368,7 @@ int main(void) {
 //				ledState1 = OFF;
 //			else
 //				ledState1 = ON;
-//			digitalWrite(LED1, ledState1);
+//			gpioWrite(LED1, ledState1);
 //
 //			/* Si pasaron 20 delays le aumento el tiempo */
 //			i++;
