@@ -1,4 +1,5 @@
 /* Copyright 2016, Eric Pernia.
+
  * All rights reserved.
  *
  * This file is part sAPI library for microcontrollers.
@@ -47,56 +48,56 @@
 
 #define forsn(i,s,n) for(i=(s);i<(n);i++){}
 #define forn (i,n) forsn(i,0,n)
-/*==================[internal data declaration]==============================*/
 
-/*==================[internal functions declaration]=========================*/
+/*==================[internal data declaration]      ========================*/
 
-/*==================[internal data definition]===============================*/
+/*==================[internal functions declaration] ========================*/
 
-/*==================[external data definition]===============================*/
+/*==================[internal data definition]       ========================*/
 
-/*==================[internal functions definition]==========================*/
+/*==================[external data definition]       ========================*/
 
-/*==================[external functions definition]==========================*/
+/*==================[internal functions definition]  ========================*/
 
-
+/*==================[external functions definition]  ========================*/
 
 #define u32 long
 #define NRSAMPLES (1024)
 #define LOWFREQDIV 8
-#define fixedpoint int
+//////////////////// valores para calcular seno y coseno en punto fijo/////////////////////////
 #define PRECISION 10
 #define qN 11
 #define qA PRECISION
 #define qP 15
 #define qR (2*qN-qP)
 #define qS (qN+qP+1-qA)
+#define MAXTOTALSAMPLES 2048
+////////////////////////////////////////////////////////////////////////////////////////////////
 
-// NOTE: Higher than 10 might give overflow for 32-bit numbers when multiplying...
-#define SCALE (1<<PRECISION)
-#define int2PI (1<<13)		// So in our book, a circle is a full 8192 units long. The sinus functions is based on this property!
-#define ALPHA ((7<<PRECISION)/13)	// 0.53836*(1<<PRECISION)
-#define BETA ((6<<PRECISION)/13)	// 1-0.53836*(1<<PRECISION)
-#define MEM 3			// the number of memorized old sampling values, should always be odd
-#define FREQSBands 8
-#define FSAMPLE 400000
-#define lowFreqBound 44
-#define highFreqBound 11360
-#define refreshRate 80
-#define MAXCYCLE (FSAMPLE/16/refreshRate)
+#define SCALE (1<<PRECISION) 			// NOTE: Higher than 10 might give overflow for 32-bit numbers when multiplying...#define int2PI (1<<13)					// So in our book, a circle is a full 8192 units long. The sinus functions is based on this property!#define ALPHA ((7<<PRECISION)/13)		// 0.53836*(1<<PRECISION)#define BETA ((6<<PRECISION)/13)		// 1-0.53836*(1<<PRECISION)#define MEM 3							// the number of memorized old sampling values, should always be odd#define FREQSBands 8
 
-#define DECAYPRECISION 10				// so with a decay of 1, every 1<<DECAYPRECISION th frame the height is lowered by 1
-#define REDUNDANCY 11
+#define FminBorde 64
+#define FmaxBorde 16384
+#define Fs 2*FmaxBorde 				//nyquist ok
+#define refreshRate 80					//test
+#define MAXCYCLE (Fs/16/refreshRate)
+#define F0 64
+#define F16 16384
+#define DECAYPRECISION 10					// so with a decay of 1, every 1<<DECAYPRECISION th frame the height is lowered by 1#define REDUNDANCY 11
+#define FREQS 8
 
 int latestSample = 0;						// most recent sample value
 int signal[NRSAMPLES];
-int test[NRSAMPLES];// current sample signal
-uint16_t signal_lowfreq[NRSAMPLES];			// current sample signal, with a lower sampling frequency (see LOWFREQDIV)
+int test[NRSAMPLES];						// current sample signal
+uint16_t signal_lowfreq[NRSAMPLES];	// current sample signal, with a lower sampling frequency (see LOWFREQDIV)
 int freqs[FREQSBands];						// frequencies for each band/filter
-u32 lowfreq_endIndex = 0;					// index stating which frequency filters use low frequency sampling
-u32 amplitude;
+u32 indice_bajas = 0;// index stating which frequency filters use low frequency sampling
+u32 amplitud;
 
-unsigned int nrInterrupts, nrInterruptsSinceEffectChange, nrInterruptsSinceSignal;	// interrupt counters
+
+
+unsigned int nrInterrupts, nrInterruptsSinceEffectChange,
+		nrInterruptsSinceSignal;	// interrupt counters
 
 unsigned int Freq[FREQSBands + 1];// lower and upper frequency for each filter/band
 
@@ -104,16 +105,53 @@ unsigned int Div[FREQSBands];	// sample frequency divider for each filter
 
 unsigned int NFreq[FREQSBands];	// number of samples needed for each filter
 
-unsigned fixedpoint twoPiQ;	// 2*pi*Q value for the CQT (Constant Q Transform)
+unsigned int dosPiQ;	// 2*pi*Q value for the CQT (Constant Q Transform)
 
 int band_it;
+unsigned int DivIndex;
 
-int fp_abs(int in) {
-	fixedpoint mask = in >> 31;
-	return (mask + in) ^ mask;
+int kb_abs(int num) { //calcula el valor absoluto rapidito ANDA BIEN
+	int mascara = num >> 31;
+	return (mascara + num) ^ mascara;
 }
 
-int approxSin(int x) {
+void preprocesar_filtros() {
+	// Calcula el tamaño de los filtros, como así tambien otras constantes necesarias para la cqt. Tiene que ser llamada cada vez que se cambia la Fs, la Fmax o Fmin.
+
+	float nn = powf(2, log(F16 / (double) F0) / log(2) / 16.0); //cambio de base
+	dosPiQ = int2PI * (nn + 1) / (nn - 1) / 2;
+
+	int i;
+	for (i = 0; i < FREQS + 1; ++i) {
+		Freq[i] = (F0 * powf(nn, i) + F16 / powf(nn, FREQS - i)) / 2;
+	}
+
+	indice_bajas = 0;
+	while (Fs / (Freq[indice_bajas + 1] - Freq[indice_bajas]) >= NRSAMPLES && indice_bajas < FREQS) {
+		++indice_bajas;
+	}
+
+	int samplesLeft = MAXTOTALSAMPLES;
+
+	for (i = 16; i > indice_bajas; --i) {
+		Div[i - 1] = 1 + Fs / ((Freq[i] - Freq[i - 1]) * samplesLeft / i);
+		NFreq[i - 1] = Fs / (Freq[i] - Freq[i - 1]) / Div[i - 1];
+		samplesLeft -= NFreq[i - 1];
+	}
+	for (; i > 0; --i) {
+		Div[i - 1] = 1
+				+ Fs / LOWFREQDIV
+						/ ((Freq[i] - Freq[i - 1]) * samplesLeft / i);
+		NFreq[i - 1] = Fs / LOWFREQDIV / (Freq[i] - Freq[i - 1])
+				/ Div[i - 1];
+		samplesLeft -= NFreq[i - 1];
+	}
+}
+
+//Funcion trigonometrica que tira valores entre -1024 y 1024, siendo PI = 8192. Es recontra rápido.
+//Usa taylor de no se que grado, re afanado de un blog
+
+int SinApprox(int x) {
 	// S(x) = x * ( (3<<p) - (x*x>>r) ) >> s
 	// n : Q-pos for quarter circle             11, so full circle is 2^13 long
 	// A : Q-pos for output                     10
@@ -122,7 +160,7 @@ int approxSin(int x) {
 	// s = A-1-p-n                              17
 
 	x = x << (30 - qN);		// resize to pi range
-	// shift to full s32 range (Q13->Q30)
+							// shift to full s32 range (Q13->Q30)
 
 	if ((x ^ (x << 1)) < 0)	// test for quadrant 1 or 2
 		x = (1 << 31) - x;
@@ -131,34 +169,36 @@ int approxSin(int x) {
 	return (x * ((3 << qP) - (x * x >> qR)) >> qS);
 }
 
-fixedpoint approxCos(fixedpoint in) {
-	return approxSin((int2PI >> 2) - in);
+int CosAprox(int in) {
+	return SinApprox((int2PI >> 2) - in);
 }
 
-fixedpoint hamming(int m, int k) {
-	return ALPHA - (BETA * approxCos(int2PI * m / NFreq[k]) >> PRECISION);
+int hamming(int m, int k) {
+	return ALPHA - (BETA * CosAprox(int2PI * m / NFreq[k]) >> PRECISION);
 }
 
 void cqt() {
 	unsigned int k, i, indx;
 	int windowed, angle;
 	float real_f, imag_f;
-	fixedpoint real, imag;
-	for (k = 0; k < lowfreq_endIndex; ++k) {
+	int real, imag;
+	for (k = 0; k < indice_bajas; ++k) {
 		indx = nrInterrupts % NRSAMPLES - 1 + 8 * NRSAMPLES;
 		real = ALPHA - (BETA * signal_lowfreq[indx % NRSAMPLES] >> PRECISION);
 		imag = 0;
 		for (i = 1; i < NFreq[k]; ++i) {
 			windowed = hamming(i, k)
 					* signal_lowfreq[(indx - i * Div[k]) % NRSAMPLES];
-			angle = twoPiQ * i / NFreq[k];
-			real += windowed * approxCos(angle) >> PRECISION;
-			imag += windowed * approxSin(angle) >> PRECISION;
+			angle = dosPiQ * i / NFreq[k];
+			real += windowed * CosAprox(angle) >> PRECISION;
+			imag += windowed * SinApprox(angle) >> PRECISION;
 		}
 
 		real_f = real / (float) SCALE;
 		imag_f = imag / (float) SCALE;
-		freqs[k] = logf(powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1) * amplitude / 32;
+		freqs[k] = logf(
+				powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)
+				* amplitud / 32;
 	}
 	for (; k < FREQSBands; ++k) {
 		indx = nrInterrupts % NRSAMPLES - 1 + 8 * NRSAMPLES;
@@ -166,17 +206,18 @@ void cqt() {
 		imag = 0;
 		for (i = 1; i < NFreq[k]; ++i) {
 			windowed = hamming(i, k) * signal[(indx - i * Div[k]) % NRSAMPLES];
-			angle = twoPiQ * i / NFreq[k];
-			real += windowed * approxCos(angle) >> PRECISION;
-			imag += windowed * approxSin(angle) >> PRECISION;
+			angle = dosPiQ * i / NFreq[k];
+			real += windowed * CosAprox(angle) >> PRECISION;
+			imag += windowed * SinApprox(angle) >> PRECISION;
 		}
 		real_f = real / (float) SCALE;
 		imag_f = imag / (float) SCALE;
 
-		freqs[k] = logf(powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)	* amplitude / 32;
+		freqs[k] = logf(
+				powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)
+				* amplitud / 32;
 	}
 }
-//////////////////////////////CONSTANT Q TRANSFORM //////////////////////////
 
 char* itoa(int value, char* result, int base) {
 	// check that the base if valid
@@ -191,7 +232,9 @@ char* itoa(int value, char* result, int base) {
 	do {
 		tmp_value = value;
 		value /= base;
-		*ptr++ ="zyxwvutsrqponmlkjihgfedcba9876543210123456789abcdefghijklmnopqrstuvwxyz"[35+ (tmp_value - value * base)];
+		*ptr++ =
+				"zyxwvutsrqponmlkjihgfedcba9876543210123456789abcdefghijklmnopqrstuvwxyz"[35
+						+ (tmp_value - value * base)];
 	} while (value);
 
 	// Apply negative sign
@@ -218,7 +261,7 @@ int main(void) {
 	tickConfig(1, 0);
 
 	/* Inicializar DigitalIO */
-	gpioConfig(0,GPIO_ENABLE);
+	gpioConfig(0, GPIO_ENABLE);
 
 	/* ConfiguraciÃ³n de pines de entrada para Teclas de la CIAA-NXP */
 	gpioConfig(TEC1, INPUT);
@@ -276,7 +319,7 @@ int main(void) {
 	delayConfig(&delay2, 200);
 	delayConfig(&delay3, 5);
 
-	uint8_t* num=0;
+	uint8_t* num = 0;
 
 	/* ------------- REPETIR POR SIEMPRE ------------- */
 	while (1) {
@@ -286,7 +329,6 @@ int main(void) {
 
 				signal[z] = (uint16_t) adcRead(AI0);
 
-
 			}
 			num++;
 			uartWriteString(UART_USB, (uint8_t*) "Fin de muestreo:   ");
@@ -294,8 +336,6 @@ int main(void) {
 
 			uartWriteString(UART_USB, uartBuff);
 			uartWriteString(UART_USB, (uint8_t*) " \r\n ");
-
-			
 
 		}
 
@@ -308,7 +348,8 @@ int main(void) {
 
 			/* EnvÃ­o la primer parte del mnesaje a la Uart */
 			//uartWriteString(UART_USB, (uint8_t*) "AI0 value: ");
-			caso = (muestra < 256) ? 0 : (muestra >= 256 && muestra < 512) ? 1 :(muestra >= 512 && muestra < 768) ? 2 : 3;
+			caso = (muestra < 256) ? 0 : (muestra >= 256 && muestra < 512) ? 1 :
+					(muestra >= 512 && muestra < 768) ? 2 : 3;
 
 			switch (caso) {
 			case 0: {

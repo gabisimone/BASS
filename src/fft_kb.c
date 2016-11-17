@@ -4,11 +4,10 @@ typedef double complex cpx;
 
 static const double dos_pi = 4 * acos(0);
 
-static void fft (cpx x[], cpx y[], int dx, int N, int dir)
+void fft (cpx x[], cpx y[], int dx, int N, int dir)
 {
 	if (N>1)
 	{
-		__asm__ __volatile__("");
 		fft(x,y,2*dx,N/2,dir);
 		fft(x+dx,y+N/2,2*dx,N/2,dir);
 		int i = 0;
