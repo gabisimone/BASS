@@ -9,9 +9,12 @@
 #ifndef EXAMPLES_EJ07_SAPI_BM_ADC_DAC_INC_MEF_H_
 #define EXAMPLES_EJ07_SAPI_BM_ADC_DAC_INC_MEF_H_
 
-void f_INICIAL(void);
+void f_norm(void);
+void f_spec_config(void);
+void f_fir_config(void);
 void f_spec (void);
 void f_fir(void);
+void MEF_reinicio (void);
 void (*MEF[])(void);
 
 

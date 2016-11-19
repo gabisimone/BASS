@@ -43,11 +43,12 @@
 #include "sAPI.h"         /* <= sAPI header */
 #include <mef.h>
 #include <fft_kb.h>
+#include "hc06_driver.h"         /* <= sAPI header */
+
 
 /*==================[macros and definitions]=================================*/
 
-#define forsn(i,s,n) for(i=(s);i<(n);i++){}
-#define forn (i,n) forsn(i,0,n)
+
 
 /*==================[internal data declaration]      ========================*/
 
@@ -74,16 +75,11 @@
 #define MAXTOTALSAMPLES 2048
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-#define SCALE (1<<PRECISION) 			// NOTE: Higher than 10 might give overflow for 32-bit numbers when multiplying...#define int2PI (1<<13)					// So in our book, a circle is a full 8192 units long. The sinus functions is based on this property!#define ALPHA ((7<<PRECISION)/13)		// 0.53836*(1<<PRECISION)#define BETA ((6<<PRECISION)/13)		// 1-0.53836*(1<<PRECISION)#define MEM 3							// the number of memorized old sampling values, should always be odd#define FREQSBands 8
-
+#define SCALE (1<<PRECISION) 			// NOTE: Higher than 10 might give overflow for 32-bit numbers when multiplying...#define int2PI (1<<13)					// So in our book, a circle is a full 8192 units long. The sinus functions is based on this property!#define ALPHA ((7<<PRECISION)/13)		// 0.53836*(1<<PRECISION)#define BETA ((6<<PRECISION)/13)		// 1-0.53836*(1<<PRECISION)#define FREQSBands 8
 #define FminBorde 64
 #define FmaxBorde 16384
-#define Fs 2*FmaxBorde 				//nyquist ok
-#define refreshRate 80					//test
-#define MAXCYCLE (Fs/16/refreshRate)
-#define F0 64
+#define Fs 2*FmaxBorde 				//nyquist ok#define refreshRate 80					//test#define F0 64
 #define F16 16384
-#define DECAYPRECISION 10					// so with a decay of 1, every 1<<DECAYPRECISION th frame the height is lowered by 1#define REDUNDANCY 11
 #define FREQS 8
 
 int latestSample = 0;						// most recent sample value
@@ -93,8 +89,7 @@ uint16_t signal_lowfreq[NRSAMPLES];	// current sample signal, with a lower sampl
 int freqs[FREQSBands];						// frequencies for each band/filter
 u32 indice_bajas = 0;// index stating which frequency filters use low frequency sampling
 u32 amplitud;
-
-
+unsigned int oldMinF, oldMaxF;
 
 unsigned int nrInterrupts, nrInterruptsSinceEffectChange,
 		nrInterruptsSinceSignal;	// interrupt counters
@@ -115,6 +110,54 @@ int kb_abs(int num) { //calcula el valor absoluto rapidito ANDA BIEN
 	return (mascara + num) ^ mascara;
 }
 
+void setup() {
+    int k;
+
+    oldMinF = 100;
+    oldMaxF = 1000;
+    amplitud = 256;
+
+    for (k = 0; k < FREQS; ++k) {
+	Div[k] = 1;		// TODO: initialize everything decently to avoid division by 0 errors and other problems
+    }
+
+}
+
+void actualizarEntradas() {
+
+    unsigned int minF = 64;
+    unsigned int maxF = 16384;	// TODO: hacer en la mef, en el estado Spec_config
+
+    if (fp_abs(minF - oldMinF) > 1 || fp_abs(maxF - oldMaxF) > 1) {
+	oldMinF = minF;
+	oldMaxF = maxF;
+
+	float base = 1.0091;
+	minF = powf(base, minF);
+	maxF = powf(base, maxF);
+	if (minF < FminBorde) {
+	    minF = FminBorde;
+	}
+	if (maxF > FmaxBorde) {
+	    maxF = FmaxBorde;
+	}
+	if (2 * minF > maxF) {	// at least one octave will always be displayed.
+	    if (2 * minF > FmaxBorde) {
+		maxF = FmaxBorde;
+		minF = FmaxBorde / 2;
+	    } else {
+		maxF = 2 * minF;
+	    }
+	}
+	if (maxF - minF < 60) {	// low frequencies must differ at least 60, so that the frequency width of each bucket is at least 2Hz. This prevents the number of samples needed to be larger than MAXSAMPLESIZE
+	    maxF = minF + 60;
+	}
+	F0 = minF;
+	F16 = maxF;
+	preprocess_filters();
+    }
+}
+
 void preprocesar_filtros() {
 	// Calcula el tamaño de los filtros, como así tambien otras constantes necesarias para la cqt. Tiene que ser llamada cada vez que se cambia la Fs, la Fmax o Fmin.
 
@@ -127,7 +170,7 @@ void preprocesar_filtros() {
 	}
 
 	indice_bajas = 0;
-	while (Fs / (Freq[indice_bajas + 1] - Freq[indice_bajas]) >= NRSAMPLES && indice_bajas < FREQS) {
+	while (Fs / (Freq[indice_bajas + 1] - Freq[indice_bajas]) >= NRSAMPLES	&& indice_bajas < FREQS) {
 		++indice_bajas;
 	}
 
@@ -139,18 +182,14 @@ void preprocesar_filtros() {
 		samplesLeft -= NFreq[i - 1];
 	}
 	for (; i > 0; --i) {
-		Div[i - 1] = 1
-				+ Fs / LOWFREQDIV
-						/ ((Freq[i] - Freq[i - 1]) * samplesLeft / i);
-		NFreq[i - 1] = Fs / LOWFREQDIV / (Freq[i] - Freq[i - 1])
-				/ Div[i - 1];
+		Div[i - 1] = 1 + Fs / LOWFREQDIV / ((Freq[i] - Freq[i - 1]) * samplesLeft / i);
+		NFreq[i - 1] = Fs / LOWFREQDIV / (Freq[i] - Freq[i - 1]) / Div[i - 1];
 		samplesLeft -= NFreq[i - 1];
 	}
 }
 
 //Funcion trigonometrica que tira valores entre -1024 y 1024, siendo PI = 8192. Es recontra rápido.
 //Usa taylor de no se que grado, re afanado de un blog
-
 int SinApprox(int x) {
 	// S(x) = x * ( (3<<p) - (x*x>>r) ) >> s
 	// n : Q-pos for quarter circle             11, so full circle is 2^13 long
@@ -196,9 +235,7 @@ void cqt() {
 
 		real_f = real / (float) SCALE;
 		imag_f = imag / (float) SCALE;
-		freqs[k] = logf(
-				powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)
-				* amplitud / 32;
+		freqs[k] = logf(	powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)	* amplitud / 32;
 	}
 	for (; k < FREQSBands; ++k) {
 		indx = nrInterrupts % NRSAMPLES - 1 + 8 * NRSAMPLES;
@@ -213,9 +250,7 @@ void cqt() {
 		real_f = real / (float) SCALE;
 		imag_f = imag / (float) SCALE;
 
-		freqs[k] = logf(
-				powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)
-				* amplitud / 32;
+		freqs[k] = logf(powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)	* amplitud / 32;
 	}
 }
 
@@ -249,6 +284,17 @@ char* itoa(int value, char* result, int base) {
 	return result;
 }
 
+bool_t llenar_buffer(void)
+{
+	uint16_t z = 0;
+				for (; z < 1023; z++) {
+
+					signal[z] = (uint16_t) adcRead(AI0);
+
+				}
+				return 1;
+}
+
 /* FUNCION PRINCIPAL, PUNTO DE ENTRADA AL PROGRAMA LUEGO DE RESET. */
 int main(void) {
 
@@ -257,8 +303,9 @@ int main(void) {
 	/* Inicializar la placa */
 	boardConfig();
 
-	/* Inicializar el conteo de Ticks con resoluciÃ³n de 1ms, sin tickHook */
-	tickConfig(1, 0);
+	/* Inicializar el conteo de Ticks con resoluciÃ³n de 10ms, el tickhook para llenar el buffer */
+	tickConfig(15, llenar_buffer());
+	HC06_init(9600);
 
 	/* Inicializar DigitalIO */
 	gpioConfig(0, GPIO_ENABLE);
@@ -268,6 +315,7 @@ int main(void) {
 	gpioConfig(TEC2, INPUT);
 	gpioConfig(TEC3, INPUT);
 	gpioConfig(TEC4, INPUT);
+
 	/* ConfiguraciÃ³n de pines de salida para Leds de la CIAA-NXP */
 	gpioConfig(LEDR, OUTPUT);
 	gpioConfig(LEDG, OUTPUT);
@@ -276,146 +324,48 @@ int main(void) {
 	gpioConfig(LED2, OUTPUT);
 	gpioConfig(LED3, OUTPUT);
 
-	/* Inicializar UART_USB a 115200 baudios */
+	/* Inicializar UART_USB a 115200 baudios para debug x consola */
 	uartConfig(UART_USB, 115200);
 
 	uint16_t muestras[NRSAMPLES];
-	/* Inicializar AnalogIO */
-	/* Posibles configuraciones:
-	 *    ENABLE_ANALOG_INPUTS,  DISABLE_ANALOG_INPUTS,
-	 *    ENABLE_ANALOG_OUTPUTS, DISABLE_ANALOG_OUTPUTS
-	 */
+
 	adcConfig(ADC_ENABLE); /* ADC */
 	dacConfig(DAC_ENABLE); /* DAC */
 
 	/*
 	 * Configurar frecuencia de muestreo ( f sample ) del ADC
-	 * al maximo (400.000 muestras
+	 * a 44100 HZ
 	 *
 	 */
+
 	ADC_CLOCK_SETUP_T ADCSetup;
-	Chip_ADC_SetSampleRate(LPC_ADC0, &ADCSetup, ADC_MAX_SAMPLE_RATE);
+	Chip_ADC_SetSampleRate(LPC_ADC0, &ADCSetup, 44100);
 
 	/* ConfiguraciÃ³n de estado inicial del Led */
-	bool_t ledState1 = OFF;
 
 	/* Contador */
 	uint16_t i = 0;
 
 	/* Buffer */
-	static uint8_t uartBuff[10];
 
 	/* Variable para almacenar el valor leido del ADC CH1 */
 	uint16_t muestra = 0;
 	uint16_t caso;
 
-	/* Variables de delays no bloqueantes */
-	delay_t delay1;
-	delay_t delay2;
-	delay_t delay3;
 
-	/* Inicializar Retardo no bloqueante con tiempo en ms */
-	delayConfig(&delay1, 60);
-	delayConfig(&delay2, 200);
-	delayConfig(&delay3, 5);
+	/* Seteo variables iniciales	 */
+	setup();
+
+
 
 	uint8_t* num = 0;
 
 	/* ------------- REPETIR POR SIEMPRE ------------- */
 	while (1) {
-		if (delayRead(&delay3)) {
-			uint16_t z = 0;
-			for (; z < 1023; z++) {
+		//TODO: acá debería actualizar la mef cada cierto tiempo, quizás con una interrupción
+		actualizarEntradas(); // TODO esto tiene que ir en la mef, cuando se pasa al estado de config
+		cqt();
 
-				signal[z] = (uint16_t) adcRead(AI0);
-
-			}
-			num++;
-			uartWriteString(UART_USB, (uint8_t*) "Fin de muestreo:   ");
-			itoa(num, uartBuff, 10); /* 10 significa decimal */
-
-			uartWriteString(UART_USB, uartBuff);
-			uartWriteString(UART_USB, (uint8_t*) " \r\n ");
-
-		}
-
-		/* delayRead retorna TRUE cuando se cumple el tiempo de retardo */
-
-		if (delayRead(&delay1)) {
-
-			/* Leo la Entrada Analogica AI0 - ADC0 CH 1 */
-			muestra = adcRead(AI0);
-
-			/* EnvÃ­o la primer parte del mnesaje a la Uart */
-			//uartWriteString(UART_USB, (uint8_t*) "AI0 value: ");
-			caso = (muestra < 256) ? 0 : (muestra >= 256 && muestra < 512) ? 1 :
-					(muestra >= 512 && muestra < 768) ? 2 : 3;
-
-			switch (caso) {
-			case 0: {
-				gpioWrite(LEDR, ON);
-				gpioWrite(LEDG, ON);
-				gpioWrite(LEDB, ON);
-				gpioWrite(LED1, OFF);
-				gpioWrite(LED2, OFF);
-				gpioWrite(LED3, OFF);
-
-				break;
-			}
-
-			case 1:
-				gpioWrite(LEDR, OFF);
-				gpioWrite(LEDG, OFF);
-				gpioWrite(LEDB, OFF);
-				gpioWrite(LED1, ON);
-				gpioWrite(LED2, OFF);
-				gpioWrite(LED3, OFF);
-
-				break;
-
-			case 2:
-				gpioWrite(LEDR, OFF);
-				gpioWrite(LEDG, OFF);
-				gpioWrite(LEDB, OFF);
-				gpioWrite(LED1, OFF);
-				gpioWrite(LED2, ON);
-				gpioWrite(LED3, OFF);
-
-				break;
-
-			case 3:
-				gpioWrite(LEDR, OFF);
-				gpioWrite(LEDG, OFF);
-				gpioWrite(LEDB, OFF);
-				gpioWrite(LED1, OFF);
-				gpioWrite(LED2, OFF);
-				gpioWrite(LED3, ON);
-
-				break;
-			}
-
-			/* ConversiÃ³n de muestra entera a ascii con base decimal */
-			//itoa(muestra, uartBuff, 10); /* 10 significa decimal */
-			/* Enviar muestra y Enter */
-			//uartWriteString(UART_USB, uartBuff);
-			//uartWriteString(UART_USB, (uint8_t*) ";\r\n");
-			/* Escribo la muestra en la Salida AnalogicaAO - DAC */
-			//analogWrite(AO, muestra);
-		}
-
-		/* delayRead retorna TRUE cuando se cumple el tiempo de retardo */
-//		if (delayRead(&delay2)) {
-//			if (ledState1)
-//				ledState1 = OFF;
-//			else
-//				ledState1 = ON;
-//			gpioWrite(LED1, ledState1);
-//
-//			/* Si pasaron 20 delays le aumento el tiempo */
-//			i++;
-//			if (i == 20)
-//				delayWrite(&delay2, 1000);
-//		}
 	}
 
 	/* NO DEBE LLEGAR NUNCA AQUI, debido a que a este programa no es llamado

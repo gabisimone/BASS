@@ -1,8 +1,7 @@
 /*
  * mef.c
 
-A implementar cuando tengamos el modulo bluetooth andando, las entradas se van a leer por ahi para actualizar la mef
-e ir pasando entre estados
+
 
  *     
  */
@@ -11,15 +10,19 @@ e ir pasando entre estados
 
 typedef enum {
 	SPEC,
+	SPEC_CONFIG,
 	FIR,
+	FIR_CONFIG,
 	NORM,
 } state;
 
 void f_norm(void);
+void f_spec_config(void);
+void f_fir_config(void);
 void f_spec (void);
 void f_fir(void);
 void MEF_reinicio (void);
-void (*MEF[])(void) = { f_norm, f_spec, f_fir };
+void (*MEF[])(void) = { f_fir_config,f_spec_config, f_norm, f_spec, f_fir };
 
 state estado;
 state estado_ant;
@@ -34,7 +37,7 @@ void Init_MEF(void) {
 
 void UpdateMEF(unsigned char tecla) {
 		
-	//entrada = tecla; para cuando hagamos andar el modulo bluetooth
+	//TODO: arreglar para recibir tecla
 	(*MEF[estado])();
 }
 
@@ -46,6 +49,14 @@ void f_norm(void) {
 		estado_ant = NORM;
 	
 	}
+}
+
+void f_spec_config(void){
+//TODO: llamar funciones ajustarEntradas, variables leídas vía bluetooth
+}
+
+void f_fir_config(void){
+//TODO: llamar funciones referentes al ajuste de los filtros, vía bluetooth
 }
 
 
@@ -95,6 +106,8 @@ void f_fir(){
 
 void MEF_reinicio(){
 	
-	
+	estado=SPEC;
+	estado_ant=SPEC;
+	UpdateMEF();
 }
 
