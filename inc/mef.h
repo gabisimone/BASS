@@ -20,7 +20,6 @@ void (*MEF[])(void);
 
 
 
-void MEF_reinicio(void);
 void Init_MEF(void);
 void UpdateMEF(unsigned char tecla);
 

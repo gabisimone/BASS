@@ -123,6 +123,19 @@ void setup() {
 
 }
 
+ void ADC_IRQ(void) {
+    // Timer Interrupt flag
+	// Clear the timer interrupt flag
+	nrInterrupts++;
+	uint16_t latestSample = (uint16_t) adcRead(AI0) - 511;
+	signal[nrInterrupts % NRSAMPLES] = latestSample;
+	signal_lowfreq[(nrInterrupts / LOWFREQDIV) % NRSAMPLES] = latestSample;
+
+}
+
+
+
+
 void actualizarEntradas() {
 
     unsigned int minF = 64;
