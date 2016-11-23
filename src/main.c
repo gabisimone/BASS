@@ -44,7 +44,10 @@
 #include <mef.h>
 #include <fft_kb.h>
 #include "hc06_driver.h"         /* <= sAPI header */
+<<<<<<< HEAD
 #include "backup_marco.h"
+=======
+>>>>>>> origin/master
 
 /*==================[macros and definitions]=================================*/
 
@@ -71,9 +74,33 @@
 #define qR (2*qN-qP)
 #define qS (qN+qP+1-qA)
 #define MAXTOTALSAMPLES 2048
+<<<<<<< HEAD
 
 #define SCALE (1<<PRECISION) 			// NOTE: Higher than 10 might give overflow for 32-bit numbers when multiplying...#define int2PI (1<<13)					// So in our book, a circle is a full 8192 units long. The sinus functions is based on this property!#define ALPHA ((7<<PRECISION)/13)		// 0.53836*(1<<PRECISION)#define BETA ((6<<PRECISION)/13)		// 1-0.53836*(1<<PRECISION)#define FREQSBands 8#define FminBorde 64#define FmaxBorde 12500#define Fs 2*FmaxBorde 				//nyquist ok#define refreshRate 80					//test#define F0 64#define F16 12500#define FREQS 8
 
+=======
+//////////////////// Mapeo de puertos GPIO //////////////////////////////////////////////////////
+#define GPIO0_P     6
+#define GPIO0_P_    1
+#define GPIO0_GPIO  3
+#define GPIO0_PIN   0
+
+#define GPIO1_P     6
+#define GPIO1_P_    4
+#define GPIO1_GPIO  3
+#define GPIO1_PIN   3
+
+#define GPIO2_P     6
+#define GPIO2_P_    5
+#define GPIO2_GPIO  3
+#define GPIO2_PIN   4
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+#define SCALE (1<<PRECISION) 			// NOTE: Higher than 10 might give overflow for 32-bit numbers when multiplying...#define int2PI (1<<13)					// So in our book, a circle is a full 8192 units long. The sinus functions is based on this property!#define ALPHA ((7<<PRECISION)/13)		// 0.53836*(1<<PRECISION)#define BETA ((6<<PRECISION)/13)		// 1-0.53836*(1<<PRECISION)#define FREQSBands 8#define FminBorde 64#define FmaxBorde 16384#define Fs 2*FmaxBorde 				//nyquist ok#define refreshRate 80					//test#define F0 64#define F16 16384#define FREQS 8//////////////////////void boardGpiosInit(void) {	Chip_SCU_PinMux(GPIO0_P, GPIO0_P_, MD_PUP | MD_ZI, FUNC0);
+	Chip_GPIO_SetDir( LPC_GPIO_PORT, GPIO0_GPIO, (1 << GPIO0_PIN), OUTPUT);
+}
+//////////////////////
+>>>>>>> origin/master
 
 int latestSample = 0;						// most recent sample value
 int signal[NRSAMPLES];
@@ -97,6 +124,7 @@ unsigned int dosPiQ;	// 2*pi*Q value for the CQT (Constant Q Transform)
 
 int band_it;
 unsigned int DivIndex;
+<<<<<<< HEAD
 
 int kb_abs(int num) { //calcula el valor absoluto rapidito ANDA BIEN
 	int mascara = num >> 31;
@@ -198,6 +226,114 @@ void preprocesar_filtros() {
 }
 
 //Funcion trigonometrica que tira valores entre -1024 y 1024, siendo PI = 8192. Es recontra rï¿½pido.
+=======
+
+int kb_abs(int num) { //calcula el valor absoluto rapidito ANDA BIEN
+	int mascara = num >> 31;
+	return (mascara + num) ^ mascara;
+}
+
+void setup() {
+	int k;
+
+	oldMinF = 100;
+	oldMaxF = 1000;
+	amplitud = 256;
+
+	for (k = 0; k < FREQS; ++k) {
+		Div[k] = 1;	// TODO: initialize everything decently to avoid division by 0 errors and other problems
+	}
+
+}
+
+void ADC_IRQ(void) {
+	// Timer Interrupt flag
+	// Clear the timer interrupt flag
+	nrInterrupts++;
+	uint16_t latestSample = (uint16_t) adcRead(AI0) - 511;
+	signal[nrInterrupts % NRSAMPLES] = latestSample;
+	signal_lowfreq[(nrInterrupts / LOWFREQDIV) % NRSAMPLES] = latestSample;
+
+
+	/////testeo para quemar CIAA
+	///// generaría una onda cuadrada por el puerto gpio0
+	if (nrInterrupts % 2 == 0)
+		Chip_GPIO_SetPinState( LPC_GPIO_PORT, GPIO0_GPIO, GPIO0_PIN, 1);
+	else
+		Chip_GPIO_SetPinState( LPC_GPIO_PORT, GPIO0_GPIO, GPIO0_PIN, 0);
+	//////////////////
+
+}
+
+void actualizarEntradas() {
+
+	unsigned int minF = 64;
+	unsigned int maxF = 16384;// TODO: hacer en la mef, en el estado Spec_config
+
+	if (fp_abs(minF - oldMinF) > 1 || fp_abs(maxF - oldMaxF) > 1) {
+		oldMinF = minF;
+		oldMaxF = maxF;
+
+		float base = 1.0091;
+		minF = powf(base, minF);
+		maxF = powf(base, maxF);
+		if (minF < FminBorde) {
+			minF = FminBorde;
+		}
+		if (maxF > FmaxBorde) {
+			maxF = FmaxBorde;
+		}
+		if (2 * minF > maxF) {	// at least one octave will always be displayed.
+			if (2 * minF > FmaxBorde) {
+				maxF = FmaxBorde;
+				minF = FmaxBorde / 2;
+			} else {
+				maxF = 2 * minF;
+			}
+		}
+		if (maxF - minF < 60) {	// low frequencies must differ at least 60, so that the frequency width of each bucket is at least 2Hz. This prevents the number of samples needed to be larger than MAXSAMPLESIZE
+			maxF = minF + 60;
+		}
+		F0 = minF;
+		F16 = maxF;
+		preprocess_filters();
+	}
+}
+
+void preprocesar_filtros() {
+	// Calcula el tamaño de los filtros, como así tambien otras constantes necesarias para la cqt. Tiene que ser llamada cada vez que se cambia la Fs, la Fmax o Fmin.
+
+	float nn = powf(2, log(F16 / (double) F0) / log(2) / 16.0); //cambio de base
+	dosPiQ = int2PI * (nn + 1) / (nn - 1) / 2;
+
+	int i;
+	for (i = 0; i < FREQS + 1; ++i) {
+		Freq[i] = (F0 * powf(nn, i) + F16 / powf(nn, FREQS - i)) / 2;
+	}
+
+	indice_bajas = 0;
+	while (Fs / (Freq[indice_bajas + 1] - Freq[indice_bajas]) >= NRSAMPLES
+			&& indice_bajas < FREQS) {
+		++indice_bajas;
+	}
+
+	int samplesLeft = MAXTOTALSAMPLES;
+
+	for (i = 16; i > indice_bajas; --i) {
+		Div[i - 1] = 1 + Fs / ((Freq[i] - Freq[i - 1]) * samplesLeft / i);
+		NFreq[i - 1] = Fs / (Freq[i] - Freq[i - 1]) / Div[i - 1];
+		samplesLeft -= NFreq[i - 1];
+	}
+	for (; i > 0; --i) {
+		Div[i - 1] = 1
+				+ Fs / LOWFREQDIV / ((Freq[i] - Freq[i - 1]) * samplesLeft / i);
+		NFreq[i - 1] = Fs / LOWFREQDIV / (Freq[i] - Freq[i - 1]) / Div[i - 1];
+		samplesLeft -= NFreq[i - 1];
+	}
+}
+
+//Funcion trigonometrica que tira valores entre -1024 y 1024, siendo PI = 8192. Es recontra rápido.
+>>>>>>> origin/master
 //Usa taylor de no se que grado, re afanado de un blog
 int SinApprox(int x) {
 	// S(x) = x * ( (3<<p) - (x*x>>r) ) >> s
@@ -261,7 +397,13 @@ void cqt() {
 		real_f = real / (float) SCALE;
 		imag_f = imag / (float) SCALE;
 
+<<<<<<< HEAD
 		freqs[k] = logf(powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)* amplitud / 32;
+=======
+		freqs[k] = logf(
+				powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)
+				* amplitud / 32;
+>>>>>>> origin/master
 	}
 }
 
@@ -303,6 +445,7 @@ int main(void) {
 	/* Inicializar la placa */
 	boardConfig();
 
+<<<<<<< HEAD
 	/* Una interrupciï¿½n temporizada de periodo 1/Fs mete un elemento al vector de muestras */
 	HC06_init(9600);
 	uint32_t temp = Timer_microsecondsToTicks(40);
@@ -312,21 +455,45 @@ int main(void) {
 	boardGpiosInit();
 
 	/* Configuraciï¿½n de pines de entrada para Teclas de la CIAA-NXP */
+=======
+	/* Una interrupción temporizada de periodo 1/Fs mete un elemento al vector de muestras */
+	HC06_init(9600);
+	uint32_t temp = Timer_microsecondsToTicks(23);
+	;
+	Timer_Init(0, temp, ADC_IRQ());
+	/* Inicializar DigitalIO */
+	gpioConfig(0, GPIO_ENABLE);
+	boardGpiosInit();
+
+	/* Configuración de pines de entrada para Teclas de la CIAA-NXP */
+>>>>>>> origin/master
 	gpioConfig(TEC1, INPUT);
 	gpioConfig(TEC2, INPUT);
 	gpioConfig(TEC3, INPUT);
 	gpioConfig(TEC4, INPUT);
 
+<<<<<<< HEAD
 	/* Configuraciï¿½n de pines de salida para Leds de la CIAA-NXP */
+=======
+	/* Configuración de pines de salida para Leds de la CIAA-NXP */
+>>>>>>> origin/master
 	gpioConfig(LEDR, OUTPUT);
 	gpioConfig(LEDG, OUTPUT);
 	gpioConfig(LEDB, OUTPUT);
 	gpioConfig(LED1, OUTPUT);
 	gpioConfig(LED2, OUTPUT);
 	gpioConfig(LED3, OUTPUT);
+<<<<<<< HEAD
 	/* Inicializar UART_USB a 115200 baudios para debug x consola */
 	uartConfig(UART_USB, 115200);
 
+=======
+
+	/* Inicializar UART_USB a 115200 baudios para debug x consola */
+	uartConfig(UART_USB, 115200);
+
+	uint16_t muestras[NRSAMPLES];
+>>>>>>> origin/master
 
 	adcConfig(ADC_ENABLE); /* ADC */
 	dacConfig(DAC_ENABLE); /* DAC */
@@ -340,7 +507,11 @@ int main(void) {
 	ADC_CLOCK_SETUP_T ADCSetup;
 	Chip_ADC_SetSampleRate(LPC_ADC0, &ADCSetup, 44100);
 
+<<<<<<< HEAD
 	/* Configuraciï¿½n de estado inicial del Led */
+=======
+	/* Configuración de estado inicial del Led */
+>>>>>>> origin/master
 
 	/* Contador */
 
@@ -348,6 +519,7 @@ int main(void) {
 
 	/* Variable para almacenar el valor leido del ADC CH1 */
 
+<<<<<<< HEAD
 
 	/* Seteo variables iniciales	 */
 	setup();
@@ -359,6 +531,19 @@ int main(void) {
 		actualizarEntradas(); 	// TODO esto tiene que ir en la mef, cuando se pasa al estado de config
 		cqt();
 		ledsControl(freqs);
+=======
+	/* Seteo variables iniciales	 */
+	setup();
+
+	uint8_t* num = 0;
+
+	/* ------------- REPETIR POR SIEMPRE ------------- */
+	while (1) {
+		//TODO: acá debería actualizar la mef cada cierto tiempo, quizás con una interrupción
+		actualizarEntradas(); // TODO esto tiene que ir en la mef, cuando se pasa al estado de config
+		cqt();
+
+>>>>>>> origin/master
 	}
 
 	/* NO DEBE LLEGAR NUNCA AQUI, debido a que a este programa no es llamado
