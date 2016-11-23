@@ -45,10 +45,7 @@
 #include <fft_kb.h>
 #include "hc06_driver.h"         /* <= sAPI header */
 
-
 /*==================[macros and definitions]=================================*/
-
-
 
 /*==================[internal data declaration]      ========================*/
 
@@ -73,14 +70,27 @@
 #define qR (2*qN-qP)
 #define qS (qN+qP+1-qA)
 #define MAXTOTALSAMPLES 2048
+//////////////////// Mapeo de puertos GPIO //////////////////////////////////////////////////////
+#define GPIO0_P     6
+#define GPIO0_P_    1
+#define GPIO0_GPIO  3
+#define GPIO0_PIN   0
+
+#define GPIO1_P     6
+#define GPIO1_P_    4
+#define GPIO1_GPIO  3
+#define GPIO1_PIN   3
+
+#define GPIO2_P     6
+#define GPIO2_P_    5
+#define GPIO2_GPIO  3
+#define GPIO2_PIN   4
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-#define SCALE (1<<PRECISION) 			// NOTE: Higher than 10 might give overflow for 32-bit numbers when multiplying...#define int2PI (1<<13)					// So in our book, a circle is a full 8192 units long. The sinus functions is based on this property!#define ALPHA ((7<<PRECISION)/13)		// 0.53836*(1<<PRECISION)#define BETA ((6<<PRECISION)/13)		// 1-0.53836*(1<<PRECISION)#define FREQSBands 8
-#define FminBorde 64
-#define FmaxBorde 16384
-#define Fs 2*FmaxBorde 				//nyquist ok#define refreshRate 80					//test#define F0 64
-#define F16 16384
-#define FREQS 8
+#define SCALE (1<<PRECISION) 			// NOTE: Higher than 10 might give overflow for 32-bit numbers when multiplying...#define int2PI (1<<13)					// So in our book, a circle is a full 8192 units long. The sinus functions is based on this property!#define ALPHA ((7<<PRECISION)/13)		// 0.53836*(1<<PRECISION)#define BETA ((6<<PRECISION)/13)		// 1-0.53836*(1<<PRECISION)#define FREQSBands 8#define FminBorde 64#define FmaxBorde 16384#define Fs 2*FmaxBorde 				//nyquist ok#define refreshRate 80					//test#define F0 64#define F16 16384#define FREQS 8//////////////////////void boardGpiosInit(void) {	Chip_SCU_PinMux(GPIO0_P, GPIO0_P_, MD_PUP | MD_ZI, FUNC0);
+	Chip_GPIO_SetDir( LPC_GPIO_PORT, GPIO0_GPIO, (1 << GPIO0_PIN), OUTPUT);
+}
+//////////////////////
 
 int latestSample = 0;						// most recent sample value
 int signal[NRSAMPLES];
@@ -111,64 +121,70 @@ int kb_abs(int num) { //calcula el valor absoluto rapidito ANDA BIEN
 }
 
 void setup() {
-    int k;
+	int k;
 
-    oldMinF = 100;
-    oldMaxF = 1000;
-    amplitud = 256;
+	oldMinF = 100;
+	oldMaxF = 1000;
+	amplitud = 256;
 
-    for (k = 0; k < FREQS; ++k) {
-	Div[k] = 1;		// TODO: initialize everything decently to avoid division by 0 errors and other problems
-    }
+	for (k = 0; k < FREQS; ++k) {
+		Div[k] = 1;	// TODO: initialize everything decently to avoid division by 0 errors and other problems
+	}
 
 }
 
- void ADC_IRQ(void) {
-    // Timer Interrupt flag
+void ADC_IRQ(void) {
+	// Timer Interrupt flag
 	// Clear the timer interrupt flag
 	nrInterrupts++;
 	uint16_t latestSample = (uint16_t) adcRead(AI0) - 511;
 	signal[nrInterrupts % NRSAMPLES] = latestSample;
 	signal_lowfreq[(nrInterrupts / LOWFREQDIV) % NRSAMPLES] = latestSample;
 
+
+	/////testeo para quemar CIAA
+	///// generar韆 una onda cuadrada por el puerto gpio0
+	if (nrInterrupts % 2 == 0)
+		Chip_GPIO_SetPinState( LPC_GPIO_PORT, GPIO0_GPIO, GPIO0_PIN, 1);
+	else
+		Chip_GPIO_SetPinState( LPC_GPIO_PORT, GPIO0_GPIO, GPIO0_PIN, 0);
+	//////////////////
+
 }
-
-
-
 
 void actualizarEntradas() {
 
-    unsigned int minF = 64;
-    unsigned int maxF = 16384;	// TODO: hacer en la mef, en el estado Spec_config
+	unsigned int minF = 64;
+	unsigned int maxF = 16384;// TODO: hacer en la mef, en el estado Spec_config
 
-    if (fp_abs(minF - oldMinF) > 1 || fp_abs(maxF - oldMaxF) > 1) {
-	oldMinF = minF;
-	oldMaxF = maxF;
+	if (fp_abs(minF - oldMinF) > 1 || fp_abs(maxF - oldMaxF) > 1) {
+		oldMinF = minF;
+		oldMaxF = maxF;
 
-	float base = 1.0091;
-	minF = powf(base, minF);
-	maxF = powf(base, maxF);
-	if (minF < FminBorde) {
-	    minF = FminBorde;
+		float base = 1.0091;
+		minF = powf(base, minF);
+		maxF = powf(base, maxF);
+		if (minF < FminBorde) {
+			minF = FminBorde;
+		}
+		if (maxF > FmaxBorde) {
+			maxF = FmaxBorde;
+		}
+		if (2 * minF > maxF) {	// at least one octave will always be displayed.
+			if (2 * minF > FmaxBorde) {
+				maxF = FmaxBorde;
+				minF = FmaxBorde / 2;
+			} else {
+				maxF = 2 * minF;
+			}
+		}
+		if (maxF - minF < 60) {	// low frequencies must differ at least 60, so that the frequency width of each bucket is at least 2Hz. This prevents the number of samples needed to be larger than MAXSAMPLESIZE
+			maxF = minF + 60;
+		}
+		F0 = minF;
+		F16 = maxF;
+		preprocess_filters();
 	}
-	if (maxF > FmaxBorde) {
-	    maxF = FmaxBorde;
-	}
-	if (2 * minF > maxF) {	// at least one octave will always be displayed.
-	    if (2 * minF > FmaxBorde) {
-		maxF = FmaxBorde;
-		minF = FmaxBorde / 2;
-	    } else {
-		maxF = 2 * minF;
-	    }
-	}
-	if (maxF - minF < 60) {	// low frequencies must differ at least 60, so that the frequency width of each bucket is at least 2Hz. This prevents the number of samples needed to be larger than MAXSAMPLESIZE
-	    maxF = minF + 60;
-	}
-	F0 = minF;
-	F16 = maxF;
-	preprocess_filters();
-    }
 }
 
 void preprocesar_filtros() {
@@ -183,7 +199,8 @@ void preprocesar_filtros() {
 	}
 
 	indice_bajas = 0;
-	while (Fs / (Freq[indice_bajas + 1] - Freq[indice_bajas]) >= NRSAMPLES	&& indice_bajas < FREQS) {
+	while (Fs / (Freq[indice_bajas + 1] - Freq[indice_bajas]) >= NRSAMPLES
+			&& indice_bajas < FREQS) {
 		++indice_bajas;
 	}
 
@@ -195,7 +212,8 @@ void preprocesar_filtros() {
 		samplesLeft -= NFreq[i - 1];
 	}
 	for (; i > 0; --i) {
-		Div[i - 1] = 1 + Fs / LOWFREQDIV / ((Freq[i] - Freq[i - 1]) * samplesLeft / i);
+		Div[i - 1] = 1
+				+ Fs / LOWFREQDIV / ((Freq[i] - Freq[i - 1]) * samplesLeft / i);
 		NFreq[i - 1] = Fs / LOWFREQDIV / (Freq[i] - Freq[i - 1]) / Div[i - 1];
 		samplesLeft -= NFreq[i - 1];
 	}
@@ -248,7 +266,9 @@ void cqt() {
 
 		real_f = real / (float) SCALE;
 		imag_f = imag / (float) SCALE;
-		freqs[k] = logf(	powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)	* amplitud / 32;
+		freqs[k] = logf(
+				powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)
+				* amplitud / 32;
 	}
 	for (; k < FREQSBands; ++k) {
 		indx = nrInterrupts % NRSAMPLES - 1 + 8 * NRSAMPLES;
@@ -263,7 +283,9 @@ void cqt() {
 		real_f = real / (float) SCALE;
 		imag_f = imag / (float) SCALE;
 
-		freqs[k] = logf(powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)	* amplitud / 32;
+		freqs[k] = logf(
+				powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)
+				* amplitud / 32;
 	}
 }
 
@@ -297,17 +319,6 @@ char* itoa(int value, char* result, int base) {
 	return result;
 }
 
-bool_t llenar_buffer(void)
-{
-	uint16_t z = 0;
-				for (; z < 1023; z++) {
-
-					signal[z] = (uint16_t) adcRead(AI0);
-
-				}
-				return 1;
-}
-
 /* FUNCION PRINCIPAL, PUNTO DE ENTRADA AL PROGRAMA LUEGO DE RESET. */
 int main(void) {
 
@@ -316,20 +327,22 @@ int main(void) {
 	/* Inicializar la placa */
 	boardConfig();
 
-	/* Inicializar el conteo de Ticks con resoluci贸n de 10ms, el tickhook para llenar el buffer */
-	tickConfig(15, llenar_buffer());
+	/* Una interrupci髇 temporizada de periodo 1/Fs mete un elemento al vector de muestras */
 	HC06_init(9600);
-
+	uint32_t temp = Timer_microsecondsToTicks(23);
+	;
+	Timer_Init(0, temp, ADC_IRQ());
 	/* Inicializar DigitalIO */
 	gpioConfig(0, GPIO_ENABLE);
+	boardGpiosInit();
 
-	/* Configuraci贸n de pines de entrada para Teclas de la CIAA-NXP */
+	/* Configuraci髇 de pines de entrada para Teclas de la CIAA-NXP */
 	gpioConfig(TEC1, INPUT);
 	gpioConfig(TEC2, INPUT);
 	gpioConfig(TEC3, INPUT);
 	gpioConfig(TEC4, INPUT);
 
-	/* Configuraci贸n de pines de salida para Leds de la CIAA-NXP */
+	/* Configuraci髇 de pines de salida para Leds de la CIAA-NXP */
 	gpioConfig(LEDR, OUTPUT);
 	gpioConfig(LEDG, OUTPUT);
 	gpioConfig(LEDB, OUTPUT);
@@ -354,7 +367,7 @@ int main(void) {
 	ADC_CLOCK_SETUP_T ADCSetup;
 	Chip_ADC_SetSampleRate(LPC_ADC0, &ADCSetup, 44100);
 
-	/* Configuraci贸n de estado inicial del Led */
+	/* Configuraci髇 de estado inicial del Led */
 
 	/* Contador */
 	uint16_t i = 0;
@@ -365,11 +378,8 @@ int main(void) {
 	uint16_t muestra = 0;
 	uint16_t caso;
 
-
 	/* Seteo variables iniciales	 */
 	setup();
-
-
 
 	uint8_t* num = 0;
 
