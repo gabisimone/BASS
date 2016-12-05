@@ -42,7 +42,6 @@
 #include <math.h>
 #include "sAPI.h"         /* <= sAPI header */
 #include <mef.h>
-#include <fft_kb.h>
 #include "hc06_driver.h"         /* <= sAPI header */
 #include "backup_marco.h"
 
@@ -61,7 +60,7 @@
 /*==================[external functions definition]  ========================*/
 
 #define u32 long
-#define NRSAMPLES (1024)
+#define CantMuestras (1024)
 #define LOWFREQDIV 8
 //////////////////// valores para calcular seno y coseno en punto fijo/////////////////////////
 #define PRECISION 10
@@ -71,14 +70,17 @@
 #define qR (2*qN-qP)
 #define qS (qN+qP+1-qA)
 #define MAXTOTALSAMPLES 2048
-
-#define SCALE (1<<PRECISION) 			// NOTE: Higher than 10 might give overflow for 32-bit numbers when multiplying...#define int2PI (1<<13)					// So in our book, a circle is a full 8192 units long. The sinus functions is based on this property!#define ALPHA ((7<<PRECISION)/13)		// 0.53836*(1<<PRECISION)#define BETA ((6<<PRECISION)/13)		// 1-0.53836*(1<<PRECISION)#define FREQSBands 8#define FminBorde 64#define FmaxBorde 12500#define Fs 2*FmaxBorde 				//nyquist ok#define refreshRate 80					//test#define F0 64#define F16 12500#define FREQS 8
+#define FSAMPLE 25000
+#define ESCALA (1<<PRECISION) 			// NOTE: Higher than 10 might give overflow for 32-bit numbers when multiplying...#define int2PI (1<<13)					// So in our book, a circle is a full 8192 units long. The sinus functions is based on this property!#define ALPHA ((7<<PRECISION)/13)		// 0.53836*(1<<PRECISION)#define BETA ((6<<PRECISION)/13)		// 1-0.53836*(1<<PRECISION)#define FREQSBands 8#define FminBorde 64#define FmaxBorde 12500#define Fs 2*FmaxBorde 				//nyquist ok#define refreshRate 80					//test#define F0 64#define F16 12500#define FREQS 8#define MAXCYCLE (FSAMPLE/FREQS/refreshRate)
+#define nrOfLayers 8
+#define nrOfBands 8
+#define maxDepth 1
 
 
 int latestSample = 0;						// most recent sample value
-int signal[NRSAMPLES];
-int test[NRSAMPLES];						// current sample signal
-uint16_t signal_lowfreq[NRSAMPLES];	// current sample signal, with a lower sampling frequency (see LOWFREQDIV)
+int senial[CantMuestras];
+int test[CantMuestras];						// current sample signal
+int16_t senial_bajas[CantMuestras];	// current sample signal, with a lower sampling frequency (see LOWFREQDIV)
 int freqs[FREQSBands];						// frequencies for each band/filter
 u32 indice_bajas = 0;// index stating which frequency filters use low frequency sampling
 u32 amplitud;
@@ -109,6 +111,7 @@ void setup() {
 	oldMinF = 100;
 	oldMaxF = 1000;
 	amplitud = 256;
+	nrInterrupts = 0;
 
 	for (k = 0; k < FREQS; ++k) {
 		Div[k] = 1;	// TODO: initialize everything decently to avoid division by 0 errors and other problems
@@ -120,14 +123,20 @@ void ADC_IRQ(void) {
 	// Timer Interrupt flag
 	// Clear the timer interrupt flag
 	nrInterrupts++;
-	uint16_t latestSample = (uint16_t) adcRead(ADC0) - 511;
-	signal[nrInterrupts % NRSAMPLES] = latestSample;
-	signal_lowfreq[(nrInterrupts / LOWFREQDIV) % NRSAMPLES] = latestSample;
+	int16_t muestra = (uint16_t) adcRead(ADC0) - 511;
+	senial[nrInterrupts % CantMuestras] = muestra;
+	senial_bajas[(nrInterrupts / LOWFREQDIV) % CantMuestras] = muestra;
 
 
 
 
 
+}
+
+void MEF_IRQ(void)
+{
+	uint8_t tecla  = HC06_ReadByte();
+	UpdateMEF(tecla);
 }
 
 void actualizarEntradas() {
@@ -166,7 +175,7 @@ void actualizarEntradas() {
 }
 
 void preprocesar_filtros() {
-	// Calcula el tamaï¿½o de los filtros, como asï¿½ tambien otras constantes necesarias para la cqt. Tiene que ser llamada cada vez que se cambia la Fs, la Fmax o Fmin.
+	// Calcula el tamaóo de los filtros, como así tambien otras constantes necesarias para la cqt. Tiene que ser llamada cada vez que se cambia la Fs, la Fmax o Fmin.
 
 	float nn = powf(2, log(F16 / (double) F0) / log(2) / 16.0); //cambio de base
 	dosPiQ = int2PI * (nn + 1) / (nn - 1) / 2;
@@ -177,14 +186,14 @@ void preprocesar_filtros() {
 	}
 
 	indice_bajas = 0;
-	while (Fs / (Freq[indice_bajas + 1] - Freq[indice_bajas]) >= NRSAMPLES
+	while (Fs / (Freq[indice_bajas + 1] - Freq[indice_bajas]) >= CantMuestras
 			&& indice_bajas < FREQS) {
 		++indice_bajas;
 	}
 
 	int samplesLeft = MAXTOTALSAMPLES;
 
-	for (i = 16; i > indice_bajas; --i) {
+	for (i = FREQS; i > indice_bajas; --i) {
 		Div[i - 1] = 1 + Fs / ((Freq[i] - Freq[i - 1]) * samplesLeft / i);
 		NFreq[i - 1] = Fs / (Freq[i] - Freq[i - 1]) / Div[i - 1];
 		samplesLeft -= NFreq[i - 1];
@@ -197,9 +206,9 @@ void preprocesar_filtros() {
 	}
 }
 
-//Funcion trigonometrica que tira valores entre -1024 y 1024, siendo PI = 8192. Es recontra rï¿½pido.
+//Funcion trigonometrica que tira valores entre -1024 y 1024, siendo PI = 8192. Es recontra rópido.
 //Usa taylor de no se que grado, re afanado de un blog
-int SinApprox(int x) {
+int SinAprox(int x) {
 	// S(x) = x * ( (3<<p) - (x*x>>r) ) >> s
 	// n : Q-pos for quarter circle             11, so full circle is 2^13 long
 	// A : Q-pos for output                     10
@@ -218,7 +227,7 @@ int SinApprox(int x) {
 }
 
 int CosAprox(int in) {
-	return SinApprox((int2PI >> 2) - in);
+	return SinAprox((int2PI >> 2) - in);
 }
 
 int hamming(int m, int k) {
@@ -226,45 +235,47 @@ int hamming(int m, int k) {
 }
 
 void cqt() {
-	unsigned int k, i, indx;
-	int windowed, angle;
+	unsigned int k, i, indice;
+	int ventana, fase;
 	float real_f, imag_f;
 	int real, imag;
 	for (k = 0; k < indice_bajas; ++k) {
-		indx = nrInterrupts % NRSAMPLES - 1 + 8 * NRSAMPLES;
-		real = ALPHA - (BETA * signal_lowfreq[indx % NRSAMPLES] >> PRECISION);
+		indice = nrInterrupts % CantMuestras - 1 + 8 * CantMuestras;
+		real = ALPHA - (BETA * senial_bajas[indice % CantMuestras] >> PRECISION);
 		imag = 0;
 		for (i = 1; i < NFreq[k]; ++i) {
-			windowed = hamming(i, k)
-					* signal_lowfreq[(indx - i * Div[k]) % NRSAMPLES];
-			angle = dosPiQ * i / NFreq[k];
-			real += windowed * CosAprox(angle) >> PRECISION;
-			imag += windowed * SinApprox(angle) >> PRECISION;
+			ventana = hamming(i, k)	* senial_bajas[(indice - i * Div[k]) % CantMuestras];
+			fase = dosPiQ * i / NFreq[k];
+			real += ventana * CosAprox(fase) >> PRECISION;
+			imag += ventana * SinAprox(fase) >> PRECISION;
 		}
 
-		real_f = real / (float) SCALE;
-		imag_f = imag / (float) SCALE;
-		freqs[k] = logf(
-				powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)
+		real_f = real / (float) ESCALA;
+		imag_f = imag / (float) ESCALA;
+		freqs[k] = logf(powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)
 				* amplitud / 32;
 	}
-	for (; k < FREQSBands; ++k) {
-		indx = nrInterrupts % NRSAMPLES - 1 + 8 * NRSAMPLES;
-		real = ALPHA - (BETA * signal[indx % NRSAMPLES] >> PRECISION);
+	for (; k < FREQS; ++k) {
+		indice = nrInterrupts % CantMuestras - 1 + 8 * CantMuestras;
+		real = ALPHA - (BETA * senial[indice % CantMuestras] >> PRECISION);
 		imag = 0;
 		for (i = 1; i < NFreq[k]; ++i) {
-			windowed = hamming(i, k) * signal[(indx - i * Div[k]) % NRSAMPLES];
-			angle = dosPiQ * i / NFreq[k];
-			real += windowed * CosAprox(angle) >> PRECISION;
-			imag += windowed * SinApprox(angle) >> PRECISION;
+			ventana = hamming(i, k) * senial[(indice - i * Div[k]) % CantMuestras];
+			fase = dosPiQ * i / NFreq[k];
+			real += ventana * CosAprox(fase) >> PRECISION;
+			imag += ventana * SinAprox(fase) >> PRECISION;
 		}
-		real_f = real / (float) SCALE;
-		imag_f = imag / (float) SCALE;
+		real_f = real / (float) ESCALA;
+		imag_f = imag / (float) ESCALA;
 
 		freqs[k] = logf(powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)* amplitud / 32;
 	}
 }
 
+
+/*
+ * Funcion robada de por ahí, transforma un valor int en cualquier base a ascii
+ */
 char* itoa(int value, char* result, int base) {
 	// check that the base if valid
 	if (base < 2 || base > 36) {
@@ -303,50 +314,25 @@ int main(void) {
 	/* Inicializar la placa */
 	boardConfig();
 
-	/* Una interrupciï¿½n temporizada de periodo 1/Fs mete un elemento al vector de muestras */
+	/* Una interrupción temporizada de periodo 1/Fs mete un elemento al vector de muestras */
 	HC06_init(9600);
-	uint32_t temp = Timer_microsecondsToTicks(40);
-	Timer_Init(0,temp,ADC_IRQ);
+
+
+	// Configuración de Timers
+	uint32_t TICKS_ADC = Timer_microsecondsToTicks(40);
+	uint32_t TICKS_MEF = Timer_microsecondsToTicks(1000000);
+	Timer_Init(TIMER0,TICKS_MEF,ADC_IRQ);
+	Timer_Init(TIMER1,TICKS_MEF,MEF_IRQ);
+
+
 	/* Inicializar DigitalIO */
-	//gpioConfig(0, GPIO_ENABLE);
 	boardGpiosInit();
 
-	/* Configuraciï¿½n de pines de entrada para Teclas de la CIAA-NXP */
-	gpioConfig(TEC1, INPUT);
-	gpioConfig(TEC2, INPUT);
-	gpioConfig(TEC3, INPUT);
-	gpioConfig(TEC4, INPUT);
-
-	/* Configuraciï¿½n de pines de salida para Leds de la CIAA-NXP */
-	gpioConfig(LEDR, OUTPUT);
-	gpioConfig(LEDG, OUTPUT);
-	gpioConfig(LEDB, OUTPUT);
-	gpioConfig(LED1, OUTPUT);
-	gpioConfig(LED2, OUTPUT);
-	gpioConfig(LED3, OUTPUT);
 	/* Inicializar UART_USB a 115200 baudios para debug x consola */
 	uartConfig(UART_USB, 115200);
 
-
-	adcConfig(ADC_ENABLE); /* ADC */
-	dacConfig(DAC_ENABLE); /* DAC */
-
-	/*
-	 * Configurar frecuencia de muestreo ( f sample ) del ADC
-	 * a 44100 HZ
-	 *
-	 */
-
-	ADC_CLOCK_SETUP_T ADCSetup;
-	Chip_ADC_SetSampleRate(LPC_ADC0, &ADCSetup, 44100);
-
-	/* Configuraciï¿½n de estado inicial del Led */
-
-	/* Contador */
-
-	/* Buffer */
-
-	/* Variable para almacenar el valor leido del ADC CH1 */
+	adcConfig(BASS); /* Configuración personalizada para BASS */
+	dacConfig(DAC_DISABLE); /* DAC DESACTIVADO */
 
 
 	/* Seteo variables iniciales	 */
@@ -354,11 +340,9 @@ int main(void) {
 
 
 	/* ------------- REPETIR POR SIEMPRE ------------- */
-	while (1) {
-								//TODO: acï¿½ deberï¿½a actualizar la mef cada cierto tiempo, quizï¿½s con una interrupciï¿½n
-		actualizarEntradas(); 	// TODO esto tiene que ir en la mef, cuando se pasa al estado de config
-		cqt();
-		ledsControl(freqs);
+	while (1)
+	{
+
 	}
 
 	/* NO DEBE LLEGAR NUNCA AQUI, debido a que a este programa no es llamado

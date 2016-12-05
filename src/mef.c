@@ -1,4 +1,3 @@
-<<<<<<< HEAD:src/mef.c
 /*
  * mef.c
 
@@ -112,7 +111,6 @@ void MEF_reinicio(){
 	//UpdateMEF();
 }
 
-=======
 /*
  * mef.c
 
@@ -168,6 +166,7 @@ void f_norm(void) {
 
 void f_spec_config(void){
 //TODO: llamar funciones ajustarEntradas, variables leídas vía bluetooth
+	actualizarEntradas();
 }
 
 void f_fir_config(void){
@@ -226,4 +225,3 @@ void MEF_reinicio(){
 	UpdateMEF();
 }
 
->>>>>>> origin/master:src/mef.c
