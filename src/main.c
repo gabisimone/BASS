@@ -41,9 +41,9 @@
 #include "main.h"         /* <= own header */
 #include <math.h>
 #include "sAPI.h"         /* <= sAPI header */
-#include <mef.h>
+#include "mef.h"
 #include "hc06_driver.h"         /* <= sAPI header */
-#include "backup_marco.h"
+#include "ledsManager.h"
 
 /*==================[macros and definitions]=================================*/
 
@@ -74,16 +74,17 @@
 #define ESCALA (1<<PRECISION) 			// NOTE: Higher than 10 might give overflow for 32-bit numbers when multiplying...#define int2PI (1<<13)					// So in our book, a circle is a full 8192 units long. The sinus functions is based on this property!#define ALPHA ((7<<PRECISION)/13)		// 0.53836*(1<<PRECISION)#define BETA ((6<<PRECISION)/13)		// 1-0.53836*(1<<PRECISION)#define FREQSBands 8#define FminBorde 64#define FmaxBorde 12500#define Fs 2*FmaxBorde 				//nyquist ok#define refreshRate 80					//test#define F0 64#define F16 12500#define FREQS 8#define MAXCYCLE (FSAMPLE/FREQS/refreshRate)
 #define nrOfLayers 8
 #define nrOfBands 8
-#define maxDepth 1
+#define maxProfundidad 1
 
-
-int latestSample = 0;						// most recent sample value
+int ultimaMuestra = 0;						// most recent sample value
 int senial[CantMuestras];
 int test[CantMuestras];						// current sample signal
 int16_t senial_bajas[CantMuestras];	// current sample signal, with a lower sampling frequency (see LOWFREQDIV)
 int freqs[FREQSBands];						// frequencies for each band/filter
 u32 indice_bajas = 0;// index stating which frequency filters use low frequency sampling
 u32 amplitud;
+unsigned char calculationFlag;
+unsigned char SATURACION=475;
 unsigned int oldMinF, oldMaxF;
 
 unsigned int nrInterrupts, nrInterruptsSinceEffectChange,
@@ -105,44 +106,37 @@ int kb_abs(int num) { //calcula el valor absoluto rapidito ANDA BIEN
 	return (mascara + num) ^ mascara;
 }
 
-void setup() {
+void setup() { //TODO: setup
 	int k;
-
 	oldMinF = 100;
 	oldMaxF = 1000;
 	amplitud = 256;
 	nrInterrupts = 0;
-
 	for (k = 0; k < FREQS; ++k) {
-		Div[k] = 1;	// TODO: initialize everything decently to avoid division by 0 errors and other problems
+		Div[k] = 1;	//
 	}
 
 }
 
-void ADC_IRQ(void) {
-	// Timer Interrupt flag
-	// Clear the timer interrupt flag
+void ADC_IRQ(void) { //TODO: ADC_IRQ
 	nrInterrupts++;
-	int16_t muestra = (uint16_t) adcRead(ADC0) - 511;
-	senial[nrInterrupts % CantMuestras] = muestra;
-	senial_bajas[(nrInterrupts / LOWFREQDIV) % CantMuestras] = muestra;
-
-
-
-
-
+	ultimaMuestra = (uint16_t) adcRead(ADC0) - 511;
+	senial[nrInterrupts % CantMuestras] = ultimaMuestra;
+	senial_bajas[(nrInterrupts / LOWFREQDIV) % CantMuestras] = ultimaMuestra;
+	ledsControl(freqs);
+	//IMPRIMIR
+	calculationFlag=1;
 }
 
-void MEF_IRQ(void)
-{
-	uint8_t tecla  = HC06_ReadByte();
+void MEF_IRQ(void) {
+	uint8_t tecla = HC06_ReadByte();
 	UpdateMEF(tecla);
 }
 
 void actualizarEntradas() {
 
 	unsigned int minF = 64;
-	unsigned int maxF = 16384;// TODO: hacer en la mef, en el estado Spec_config
+	unsigned int maxF = 16384;	// TODO: ACTUALIZAR ENTRADAS
 
 	if (kb_abs(minF - oldMinF) > 1 || kb_abs(maxF - oldMaxF) > 1) {
 		oldMinF = minF;
@@ -157,7 +151,7 @@ void actualizarEntradas() {
 		if (maxF > FmaxBorde) {
 			maxF = FmaxBorde;
 		}
-		if (2 * minF > maxF) {	// at least one octave will always be displayed.
+		if (2 * minF > maxF) {	// al menos una octava
 			if (2 * minF > FmaxBorde) {
 				maxF = FmaxBorde;
 				minF = FmaxBorde / 2;
@@ -174,8 +168,8 @@ void actualizarEntradas() {
 	}
 }
 
-void preprocesar_filtros() {
-	// Calcula el tamaóo de los filtros, como así tambien otras constantes necesarias para la cqt. Tiene que ser llamada cada vez que se cambia la Fs, la Fmax o Fmin.
+void preprocesar_filtros() { //TODO: preprocesar filtros
+	// Calcula el tamaï¿½o de los filtros, como asï¿½ tambien otras constantes necesarias para la cqt. Tiene que ser llamada cada vez que se cambia la Fs, la Fmax o Fmin.
 
 	float nn = powf(2, log(F16 / (double) F0) / log(2) / 16.0); //cambio de base
 	dosPiQ = int2PI * (nn + 1) / (nn - 1) / 2;
@@ -199,15 +193,14 @@ void preprocesar_filtros() {
 		samplesLeft -= NFreq[i - 1];
 	}
 	for (; i > 0; --i) {
-		Div[i - 1] = 1
-				+ Fs / LOWFREQDIV / ((Freq[i] - Freq[i - 1]) * samplesLeft / i);
+		Div[i - 1] = 1	+ Fs / LOWFREQDIV / ((Freq[i] - Freq[i - 1]) * samplesLeft / i);
 		NFreq[i - 1] = Fs / LOWFREQDIV / (Freq[i] - Freq[i - 1]) / Div[i - 1];
 		samplesLeft -= NFreq[i - 1];
 	}
 }
 
-//Funcion trigonometrica que tira valores entre -1024 y 1024, siendo PI = 8192. Es recontra rópido.
-//Usa taylor de no se que grado, re afanado de un blog
+//Funcion trigonometrica que tira valores entre -1024 y 1024, siendo PI = 8192. Es recontra rï¿½pido.
+//Usa taylor de grado 4, re afanado de un blog
 int SinAprox(int x) {
 	// S(x) = x * ( (3<<p) - (x*x>>r) ) >> s
 	// n : Q-pos for quarter circle             11, so full circle is 2^13 long
@@ -241,10 +234,12 @@ void cqt() {
 	int real, imag;
 	for (k = 0; k < indice_bajas; ++k) {
 		indice = nrInterrupts % CantMuestras - 1 + 8 * CantMuestras;
-		real = ALPHA - (BETA * senial_bajas[indice % CantMuestras] >> PRECISION);
+		real = ALPHA
+				- (BETA * senial_bajas[indice % CantMuestras] >> PRECISION);
 		imag = 0;
 		for (i = 1; i < NFreq[k]; ++i) {
-			ventana = hamming(i, k)	* senial_bajas[(indice - i * Div[k]) % CantMuestras];
+			ventana = hamming(i, k)
+					* senial_bajas[(indice - i * Div[k]) % CantMuestras];
 			fase = dosPiQ * i / NFreq[k];
 			real += ventana * CosAprox(fase) >> PRECISION;
 			imag += ventana * SinAprox(fase) >> PRECISION;
@@ -252,7 +247,8 @@ void cqt() {
 
 		real_f = real / (float) ESCALA;
 		imag_f = imag / (float) ESCALA;
-		freqs[k] = logf(powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)
+		freqs[k] = logf(
+				powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)
 				* amplitud / 32;
 	}
 	for (; k < FREQS; ++k) {
@@ -260,7 +256,8 @@ void cqt() {
 		real = ALPHA - (BETA * senial[indice % CantMuestras] >> PRECISION);
 		imag = 0;
 		for (i = 1; i < NFreq[k]; ++i) {
-			ventana = hamming(i, k) * senial[(indice - i * Div[k]) % CantMuestras];
+			ventana = hamming(i, k)
+					* senial[(indice - i * Div[k]) % CantMuestras];
 			fase = dosPiQ * i / NFreq[k];
 			real += ventana * CosAprox(fase) >> PRECISION;
 			imag += ventana * SinAprox(fase) >> PRECISION;
@@ -268,13 +265,14 @@ void cqt() {
 		real_f = real / (float) ESCALA;
 		imag_f = imag / (float) ESCALA;
 
-		freqs[k] = logf(powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)* amplitud / 32;
+		freqs[k] = logf(
+				powf(real_f * real_f + imag_f * imag_f, 0.5) / NFreq[k] + 0.1)
+				* amplitud / 32;
 	}
 }
 
-
 /*
- * Funcion robada de por ahí, transforma un valor int en cualquier base a ascii
+ * Funcion robada de por ahï¿½, transforma un valor int en cualquier base a ascii
  */
 char* itoa(int value, char* result, int base) {
 	// check that the base if valid
@@ -314,16 +312,14 @@ int main(void) {
 	/* Inicializar la placa */
 	boardConfig();
 
-	/* Una interrupción temporizada de periodo 1/Fs mete un elemento al vector de muestras */
+	/* Una interrupciï¿½n temporizada de periodo 1/Fs mete un elemento al vector de muestras */
 	HC06_init(9600);
 
-
-	// Configuración de Timers
-	uint32_t TICKS_ADC = Timer_microsecondsToTicks(40);
-	uint32_t TICKS_MEF = Timer_microsecondsToTicks(1000000);
-	Timer_Init(TIMER0,TICKS_MEF,ADC_IRQ);
-	Timer_Init(TIMER1,TICKS_MEF,MEF_IRQ);
-
+	// Configuraciï¿½n de Timers
+	uint32_t TICKS_ADC = Timer_microsecondsToTicks(40);//25 KHz
+	//uint32_t TICKS_MEF = Timer_microsecondsToTicks(1000000);
+	Timer_Init(TIMER0, TICKS_ADC, ADC_IRQ);
+	//Timer_Init(TIMER1,TICKS_MEF,MEF_IRQ);
 
 	/* Inicializar DigitalIO */
 	boardGpiosInit();
@@ -331,17 +327,30 @@ int main(void) {
 	/* Inicializar UART_USB a 115200 baudios para debug x consola */
 	uartConfig(UART_USB, 115200);
 
-	adcConfig(BASS); /* Configuración personalizada para BASS */
+	adcConfig(BASS); /* Configuraciï¿½n personalizada para BASS */
 	dacConfig(DAC_DISABLE); /* DAC DESACTIVADO */
-
 
 	/* Seteo variables iniciales	 */
 	setup();
 
-
 	/* ------------- REPETIR POR SIEMPRE ------------- */
-	while (1)
-	{
+	while (1) {
+		if (fp_abs(ultimaMuestra) >= SATURACION) {	//se fija que no sature, si satura prende los leds.
+				gpioWrite(LED1,ON);
+				gpioWrite(LED2,ON);
+				gpioWrite(LED3,ON);
+			} else {
+				gpioWrite(LED1,OFF);
+				gpioWrite(LED2,OFF);
+				gpioWrite(LED3,OFF);
+			}
+		actualizarEntradas();
+
+		if(calculationFlag != 0)
+		{
+			calculationFlag=0;
+			cqt();
+		}
 
 	}
 

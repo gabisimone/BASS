@@ -514,7 +514,7 @@ unsigned int log2int( unsigned int x )
 #include        <stdio.h>
 #include        <stdlib.h>
 #include        <math.h>
-#include        <windows.h>
+
 
 #define M       10
 #define N       (1<<M)
@@ -523,7 +523,7 @@ unsigned int log2int( unsigned int x )
 int main(){
         fixed real[N], imag[N];
         fixed energia[N];
-        byte bandas[8];
+        unsigned char bandas[8];
         int     i;
 
         for (i=0; i<N; i++){
