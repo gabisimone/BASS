@@ -39,7 +39,7 @@
 /*==================[inclusions]=============================================*/
 
 #include "main.h"         /* <= own header */
-#include <math.h>
+#include "math.h"
 #include "sAPI.h"         /* <= sAPI header */
 #include "mef.h"
 #include "hc06_driver.h"         /* <= sAPI header */
@@ -71,7 +71,7 @@
 #define qS (qN+qP+1-qA)
 #define MAXTOTALSAMPLES 2048
 #define FSAMPLE 25000
-#define ESCALA (1<<PRECISION) 			// NOTE: Higher than 10 might give overflow for 32-bit numbers when multiplying...#define int2PI (1<<13)					// So in our book, a circle is a full 8192 units long. The sinus functions is based on this property!#define ALPHA ((7<<PRECISION)/13)		// 0.53836*(1<<PRECISION)#define BETA ((6<<PRECISION)/13)		// 1-0.53836*(1<<PRECISION)#define FREQSBands 8#define FminBorde 64#define FmaxBorde 12500#define Fs 2*FmaxBorde 				//nyquist ok#define refreshRate 80					//test#define F0 64#define F16 12500#define FREQS 8#define MAXCYCLE (FSAMPLE/FREQS/refreshRate)
+#define ESCALA (1<<PRECISION) 			//  valores mayores a 10 da overflow al multiplicar#define int2PI (1<<13)					// un circulo completo tiene 8192 unidades de largo, el seno usa esta propiedad#define ALPHA ((7<<PRECISION)/13)		// 0.53836*(1<<PRECISION)#define BETA ((6<<PRECISION)/13)		// 1-0.53836*(1<<PRECISION)		para la hamming#define FREQSBands 8#define FminBorde 64#define FmaxBorde 12500#define Fs 2*FmaxBorde 				//nyquist ok#define refreshRate 80					//test#define F0 64#define F16 12500#define FREQS 8#define MAXCYCLE (FSAMPLE/FREQS/refreshRate)
 #define nrOfLayers 8
 #define nrOfBands 8
 #define maxProfundidad 1
@@ -327,7 +327,7 @@ int main(void) {
 	/* Inicializar UART_USB a 115200 baudios para debug x consola */
 	uartConfig(UART_USB, 115200);
 
-	adcConfig(BASS); /* Configuraci�n personalizada para BASS */
+	adcConfig(BASS_SPECTRUM); /* Configuraci�n personalizada para BASS */
 	dacConfig(DAC_DISABLE); /* DAC DESACTIVADO */
 
 	/* Seteo variables iniciales	 */

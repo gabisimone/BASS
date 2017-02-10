@@ -268,7 +268,7 @@ void setMainDepth(int *values, int mainDepth) {
 #define rollbacktime 2500
 int pushBackPhase = 0;
 
-void pushBack(u32 time, int *values) {
+void pushBack(u32 time, int *values) { //TODO: 3 PUSHBACK
 	setAllUnfilled();
 	int d;
 	if (time / (rollbacktime / NRPHASES) >= pushBackPhase) {
@@ -531,7 +531,7 @@ void preprocess_filters() { //TODO :preprocess_filters
 }
 
 //-------------------------------
-void chooseEffect() {
+void chooseEffect() { //TODO: 2 choose effects
 	u32 time = nrInterrupts - nrInterruptsSinceEffectChange;
 	if (time < rollbacktime) {
 		pushBack(time, freqs);
@@ -539,6 +539,9 @@ void chooseEffect() {
 	}
 }
 
+*/
+//imprime
+/*
 void adjustLayers()  //TODO :adjustlayers
 {
 
@@ -552,6 +555,7 @@ void adjustLayers()  //TODO :adjustlayers
 	}
 	unsigned int l = layercounter / MAXCYCLE;	// this is the current layer
 	if ((MAXCYCLE - phase) - layerIntensity[l] == 0) {
+
 		// pushing data into shift registers
 		int i;
 		for (i = 0; i < maxDepth; ++i) {
@@ -782,7 +786,7 @@ void calculateSPIData() {
 	spiPointer = tmpPointer;
 }
 
-void loop() {
+void loop() {//TODO: LOOP
 
 	if (fp_abs(latestSample) >= SATURATION_LEVEL) {	// checking for saturation (old: 475)
 		digitalWrite(SATURATION_PIN, 1);

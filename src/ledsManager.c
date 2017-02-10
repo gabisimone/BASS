@@ -8,26 +8,6 @@ uint32_t tiempoCumplido = 0;
 volatile uint32_t sendClk = 0;
 /*==================[internal functions definition]==========================*/
 
- void boardButtonsInit(void) {
-	/* Config EDU-CIAA-NXP Button Pins as GPIOs */
-	gpioConfig(TEC1,INPUT);
-	gpioConfig(TEC2,INPUT);
-	gpioConfig(TEC3,INPUT);
-	gpioConfig(TEC4,INPUT);
-}
-
- void boardLedsInit(void) {
-
-	/* Config EDU-CIAA-NXP Led Pins as GPIOs */
-	gpioConfig(LEDR,OUTPUT);
-	gpioConfig(LEDG,OUTPUT);
-	gpioConfig(LEDB,OUTPUT);
-	gpioConfig(LED1,OUTPUT);
-	gpioConfig(LED2,OUTPUT);
-	gpioConfig(LED3,OUTPUT);
-
-}
-
  void boardGpiosInit(void) {
 	gpioConfig(CLKLEDS,OUTPUT);
 	gpioConfig(CLKGND,OUTPUT);
