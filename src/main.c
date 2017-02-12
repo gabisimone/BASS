@@ -76,21 +76,20 @@
 #define nrOfBands 8
 #define maxProfundidad 1
 
-int ultimaMuestra = 0;						// most recent sample value
+int ultimaMuestra = 0;						// ultima muestra
 int senial[CantMuestras];
-int test[CantMuestras];						// current sample signal
-int16_t senial_bajas[CantMuestras];	// current sample signal, with a lower sampling frequency (see LOWFREQDIV)
-int freqs[FREQSBands];						// frequencies for each band/filter
-u32 indice_bajas = 0;// index stating which frequency filters use low frequency sampling
+int16_t senial_bajas[CantMuestras];	// señal de las bajas frecuencias
+int freqs[FREQSBands];						// frecuencias de cada banda/filtro
+u32 indice_bajas = 0;// indice que indica que filtros de frecuencia usan una frtecuencia de muestreo mas baja
 u32 amplitud;
 unsigned char calculationFlag;
 unsigned char SATURACION=475;
 unsigned int oldMinF, oldMaxF;
 
 unsigned int nrInterrupts, nrInterruptsSinceEffectChange,
-		nrInterruptsSinceSignal;	// interrupt counters
+		nrInterruptsSinceSignal;	// contadores de interrupcion
 
-unsigned int Freq[FREQSBands + 1];// lower and upper frequency for each filter/band
+unsigned int Freq[FREQSBands + 1];// frecuencias superior e inferior por cada filtro/banda
 
 unsigned int Div[FREQSBands];	// sample frequency divider for each filter
 
