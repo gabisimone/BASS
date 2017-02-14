@@ -494,17 +494,7 @@ fixed Loudampl[100] = {
       0,      0,      0,      0,
 };
 
-void imprimir(fixed energia[])
-{
-    for (int i=0;i<10;i++)
-    {
-        for (int j=0;j<10;j++)
-        {
-            printf("%c   ",'►');
-            if(j==9)printf("\n");
-        }
-    }
-}
+
 unsigned int log2int( unsigned int x )
 {
   unsigned int ans = 0 ;
@@ -518,42 +508,5 @@ unsigned int log2int( unsigned int x )
 
 #define M       10
 #define N       (1<<M)
-
-
-int main(){
-        fixed real[N], imag[N];
-        fixed energia[N];
-        unsigned char bandas[8];
-        int     i;
-
-        for (i=0; i<N; i++){
-                real[i] = 1000*cos(i*2*3.1415926535/N);
-                imag[i] = 0;
-        }
-        for(i=0;i<8;i++)
-            bandas[i]=0;
-
-
-        fix_fft(real, imag, M, 0);
-
-        for (i=1; i<N; i++){
-                //printf("%d: %d, %d\n", i, real[i], imag[i]);
-                energia[i] = 2*lround(pow(real[i],2)+pow(imag[i],2));
-                bandas[1+lround(ceil(i/128))]+=energia[i];
-                //printf("%d: %d\n", i,2*lround(sqrt(pow(real[i],2)+pow(imag[i],2))));
-                printf("%d %d \n",i,i/128      );
-
-        }
-
-       /* fix_fft(real, imag, M, 1);
-
-        for (i=0; i<N; i++){
-                printf("%d: %d, %d\n", i, real[i], imag[i]);
-        }*/
-        imprimir(energia);
-        //system("cls");
-        return 0;
-}
-
 
 

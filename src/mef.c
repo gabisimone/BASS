@@ -7,7 +7,7 @@
  */
 
 
-
+/*
 typedef enum {
 	SPEC,
 	SPEC_CONFIG,
@@ -117,7 +117,7 @@ void MEF_reinicio(){
 
 
  *     
- */
+
 
 
 
@@ -225,3 +225,4 @@ void MEF_reinicio(){
 	UpdateMEF();
 }
 
+*/

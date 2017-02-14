@@ -71,50 +71,31 @@
 #define qS (qN+qP+1-qA)
 #define MAXTOTALSAMPLES 2048
 #define FSAMPLE 25000
-#define ESCALA (1<<PRECISION) 			//  valores mayores a 10 da overflow al multiplicar#define int2PI (1<<13)					// un circulo completo tiene 8192 unidades de largo, el seno usa esta propiedad#define ALPHA ((7<<PRECISION)/13)		// 0.53836*(1<<PRECISION)#define BETA ((6<<PRECISION)/13)		// 1-0.53836*(1<<PRECISION)		para la hamming#define FREQSBands 8#define FminBorde 64#define FmaxBorde 12500#define Fs 2*FmaxBorde 				//nyquist ok#define refreshRate 80					//test#define F0 64#define F16 12500#define FREQS 8#define MAXCYCLE (FSAMPLE/FREQS/refreshRate)
-#define nrOfLayers 8
-#define nrOfBands 8
-#define maxProfundidad 1
+#define ESCALA (1<<PRECISION) 			//  valores mayores a 10 da overflow al multiplicar#define int2PI (1<<13)					// un circulo completo tiene 8192 unidades de largo, el seno usa esta propiedad#define ALPHA ((7<<PRECISION)/13)		// 0.53836*(1<<PRECISION)#define BETA ((6<<PRECISION)/13)		// 1-0.53836*(1<<PRECISION)		para la hamming#define FminBorde 20#define FmaxBorde 12500#define Fs 2*FmaxBorde 				//nyquist ok#define refreshRate 60					//test#define SATURACION 465#define FREQS 8#define MAXCYCLE (FSAMPLE/FREQS/refreshRate)#define nrOfBands 8int ultimaMuestra = 0;						// ultima muestraint senial[CantMuestras];int16_t senial_bajas[CantMuestras];	// señal de las bajas frecuenciasunsigned int freqs[FREQS];						// frecuencias de cada banda/filtrou32 indice_bajas = 0; // indice que indica que filtros de frecuencia usan una frtecuencia de muestreo mas bajau32 amplitud;unsigned char calculationFlag;unsigned int oldMinF, oldMaxF, F0, F16;unsigned int nrInterrupts, nrInterruptsSinceEffectChange,nrInterruptsSinceSignal;	// contadores de interrupcion
+unsigned int refreshCounter;
+unsigned int Freq[FREQS + 1];// frecuencias superior e inferior por cada filtro/banda
 
-int ultimaMuestra = 0;						// ultima muestra
-int senial[CantMuestras];
-int16_t senial_bajas[CantMuestras];	// señal de las bajas frecuencias
-int freqs[FREQSBands];						// frecuencias de cada banda/filtro
-u32 indice_bajas = 0;// indice que indica que filtros de frecuencia usan una frtecuencia de muestreo mas baja
-u32 amplitud;
-unsigned char calculationFlag;
-unsigned char SATURACION=475;
-unsigned int oldMinF, oldMaxF;
+unsigned int Div[FREQS];// divisor de frecuencias de muestras para cada filtro
 
-unsigned int nrInterrupts, nrInterruptsSinceEffectChange,
-		nrInterruptsSinceSignal;	// contadores de interrupcion
-
-unsigned int Freq[FREQSBands + 1];// frecuencias superior e inferior por cada filtro/banda
-
-unsigned int Div[FREQSBands];	// sample frequency divider for each filter
-
-unsigned int NFreq[FREQSBands];	// number of samples needed for each filter
+unsigned int NFreq[FREQS];	// numero de muestras necesarios para cada filtro
 
 unsigned int dosPiQ;	// 2*pi*Q value for the CQT (Constant Q Transform)
 
 int band_it;
 unsigned int DivIndex;
+unsigned int leds[FREQS];
 
 int kb_abs(int num) { //calcula el valor absoluto rapidito ANDA BIEN
 	int mascara = num >> 31;
 	return (mascara + num) ^ mascara;
 }
 
-void setup() { //TODO: setup
-	int k;
-	oldMinF = 100;
-	oldMaxF = 1000;
-	amplitud = 256;
-	nrInterrupts = 0;
-	for (k = 0; k < FREQS; ++k) {
-		Div[k] = 1;	//
+int applyDecay(int new, int old) {
+	if (new >= old) {
+		return (2 * new + old) / 3;
+	} else {
+		return (old + new * (1024)) / 1024;
 	}
-
 }
 
 void ADC_IRQ(void) { //TODO: ADC_IRQ
@@ -122,9 +103,38 @@ void ADC_IRQ(void) { //TODO: ADC_IRQ
 	ultimaMuestra = (uint16_t) adcRead(ADC0) - 511;
 	senial[nrInterrupts % CantMuestras] = ultimaMuestra;
 	senial_bajas[(nrInterrupts / LOWFREQDIV) % CantMuestras] = ultimaMuestra;
-	ledsControl(freqs);
-	//IMPRIMIR
-	calculationFlag=1;
+	actualizarEntradas();
+
+	ledsControl(leds);
+
+	if (!(refreshCounter % MAXCYCLE))
+		calculationFlag = 1;
+}
+
+void setup() { //TODO: setup
+	int k;
+	oldMinF = 20;
+	oldMaxF = 12500;
+	amplitud = 256;
+	nrInterrupts = 0;
+	for (k = 0; k < FREQS; ++k) {
+		Div[k] = 1;	//
+	}
+	for (k = 0; k < FREQS; k++) {
+		leds[k] = 0;
+	}
+	HC06_init(9600);
+
+	// Configuraciï¿½n de Timers
+	uint32_t TICKS_ADC = Timer_microsecondsToTicks(40);	//25 KHz
+	//uint32_t TICKS_MEF = Timer_microsecondsToTicks(1000000);
+	Timer_Init(TIMER0, TICKS_ADC, ADC_IRQ);
+	uartConfig(UART_USB, 115200);
+	adcConfig(BASS_SPECTRUM); /* Configuraciï¿½n personalizada para BASS */
+	dacConfig(DAC_DISABLE); /* DAC DESACTIVADO */
+	boardGpiosInit();
+	preprocesar_filtros();
+
 }
 
 void MEF_IRQ(void) {
@@ -133,42 +143,26 @@ void MEF_IRQ(void) {
 }
 
 void actualizarEntradas() {
+	char k;
+	unsigned int valor;
+	unsigned int minF = 20;
+	unsigned int maxF = 12500;	// TODO: ACTUALIZAR ENTRADAS
+	float base = 1.0091;
+	F0 = powf(base, minF);
+	F16 = powf(base, maxF);
 
-	unsigned int minF = 64;
-	unsigned int maxF = 16384;	// TODO: ACTUALIZAR ENTRADAS
-
-	if (kb_abs(minF - oldMinF) > 1 || kb_abs(maxF - oldMaxF) > 1) {
-		oldMinF = minF;
-		oldMaxF = maxF;
-
-		float base = 1.0091;
-		minF = powf(base, minF);
-		maxF = powf(base, maxF);
-		if (minF < FminBorde) {
-			minF = FminBorde;
-		}
-		if (maxF > FmaxBorde) {
-			maxF = FmaxBorde;
-		}
-		if (2 * minF > maxF) {	// al menos una octava
-			if (2 * minF > FmaxBorde) {
-				maxF = FmaxBorde;
-				minF = FmaxBorde / 2;
-			} else {
-				maxF = 2 * minF;
-			}
-		}
-		if (maxF - minF < 60) {	// low frequencies must differ at least 60, so that the frequency width of each bucket is at least 2Hz. This prevents the number of samples needed to be larger than MAXSAMPLESIZE
-			maxF = minF + 60;
-		}
-		minF = F0;
-		maxF = F16;
-		preprocesar_filtros();
+	for (k = 0; k < FREQS; k++) {
+		valor = freqs[k] << 10;
+		leds[k] = applyDecay(valor, leds[k]);
+		if (leds[k] < 1)
+			leds[k] = 1;
+		if (leds[k] > 16)
+			leds[k] = 16;
 	}
 }
 
 void preprocesar_filtros() { //TODO: preprocesar filtros
-	// Calcula el tamaï¿½o de los filtros, como asï¿½ tambien otras constantes necesarias para la cqt. Tiene que ser llamada cada vez que se cambia la Fs, la Fmax o Fmin.
+// Calcula el tamaï¿½o de los filtros, como asï¿½ tambien otras constantes necesarias para la cqt. Tiene que ser llamada cada vez que se cambia la Fs, la Fmax o Fmin.
 
 	float nn = powf(2, log(F16 / (double) F0) / log(2) / 16.0); //cambio de base
 	dosPiQ = int2PI * (nn + 1) / (nn - 1) / 2;
@@ -192,7 +186,8 @@ void preprocesar_filtros() { //TODO: preprocesar filtros
 		samplesLeft -= NFreq[i - 1];
 	}
 	for (; i > 0; --i) {
-		Div[i - 1] = 1	+ Fs / LOWFREQDIV / ((Freq[i] - Freq[i - 1]) * samplesLeft / i);
+		Div[i - 1] = 1
+				+ Fs / LOWFREQDIV / ((Freq[i] - Freq[i - 1]) * samplesLeft / i);
 		NFreq[i - 1] = Fs / LOWFREQDIV / (Freq[i] - Freq[i - 1]) / Div[i - 1];
 		samplesLeft -= NFreq[i - 1];
 	}
@@ -201,12 +196,12 @@ void preprocesar_filtros() { //TODO: preprocesar filtros
 //Funcion trigonometrica que tira valores entre -1024 y 1024, siendo PI = 8192. Es recontra rï¿½pido.
 //Usa taylor de grado 4, re afanado de un blog
 int SinAprox(int x) {
-	// S(x) = x * ( (3<<p) - (x*x>>r) ) >> s
-	// n : Q-pos for quarter circle             11, so full circle is 2^13 long
-	// A : Q-pos for output                     10
-	// p : Q-pos for parentheses intermediate   15
-	// r = 2n-p                                  7
-	// s = A-1-p-n                              17
+// S(x) = x * ( (3<<p) - (x*x>>r) ) >> s
+// n : Q-pos for quarter circle             11, so full circle is 2^13 long
+// A : Q-pos for output                     10
+// p : Q-pos for parentheses intermediate   15
+// r = 2n-p                                  7
+// s = A-1-p-n                              17
 
 	x = x << (30 - qN);		// resize to pi range
 							// shift to full s32 range (Q13->Q30)
@@ -274,7 +269,7 @@ void cqt() {
  * Funcion robada de por ahï¿½, transforma un valor int en cualquier base a ascii
  */
 char* itoa(int value, char* result, int base) {
-	// check that the base if valid
+// check that the base if valid
 	if (base < 2 || base > 36) {
 		*result = '\0';
 		return result;
@@ -291,7 +286,7 @@ char* itoa(int value, char* result, int base) {
 						+ (tmp_value - value * base)];
 	} while (value);
 
-	// Apply negative sign
+// Apply negative sign
 	if (tmp_value < 0)
 		*ptr++ = '-';
 	*ptr-- = '\0';
@@ -306,48 +301,27 @@ char* itoa(int value, char* result, int base) {
 /* FUNCION PRINCIPAL, PUNTO DE ENTRADA AL PROGRAMA LUEGO DE RESET. */
 int main(void) {
 
-	/* ------------- INICIALIZACIONES ------------- */
-
 	/* Inicializar la placa */
 	boardConfig();
-
-	/* Una interrupciï¿½n temporizada de periodo 1/Fs mete un elemento al vector de muestras */
-	HC06_init(9600);
-
-	// Configuraciï¿½n de Timers
-	uint32_t TICKS_ADC = Timer_microsecondsToTicks(40);//25 KHz
-	//uint32_t TICKS_MEF = Timer_microsecondsToTicks(1000000);
-	Timer_Init(TIMER0, TICKS_ADC, ADC_IRQ);
-	//Timer_Init(TIMER1,TICKS_MEF,MEF_IRQ);
-
-	/* Inicializar DigitalIO */
-	boardGpiosInit();
-
-	/* Inicializar UART_USB a 115200 baudios para debug x consola */
-	uartConfig(UART_USB, 115200);
-
-	adcConfig(BASS_SPECTRUM); /* Configuraciï¿½n personalizada para BASS */
-	dacConfig(DAC_DISABLE); /* DAC DESACTIVADO */
-
-	/* Seteo variables iniciales	 */
-	setup();
+//Timer_Init(TIMER1,TICKS_MEF,MEF_IRQ);
+	setup(); //arranca la ciaa para muestrear y demas
 
 	/* ------------- REPETIR POR SIEMPRE ------------- */
 	while (1) {
-		if (fp_abs(ultimaMuestra) >= SATURACION) {	//se fija que no sature, si satura prende los leds.
-				gpioWrite(LED1,ON);
-				gpioWrite(LED2,ON);
-				gpioWrite(LED3,ON);
-			} else {
-				gpioWrite(LED1,OFF);
-				gpioWrite(LED2,OFF);
-				gpioWrite(LED3,OFF);
-			}
+		if (kb_abs(ultimaMuestra) >= SATURACION) { //se fija que no sature, si satura prende los leds.
+			gpioWrite(LED1, ON);
+			gpioWrite(LED2, ON);
+			gpioWrite(LED3, ON);
+		} else {
+			gpioWrite(LED1, OFF);
+			gpioWrite(LED2, OFF);
+			gpioWrite(LED3, OFF);
+		}
 		actualizarEntradas();
 
-		if(calculationFlag != 0)
-		{
-			calculationFlag=0;
+		if (calculationFlag == 1) {
+			calculationFlag = 0;
+			refreshCounter = MAXCYCLE;
 			cqt();
 		}
 

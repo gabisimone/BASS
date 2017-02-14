@@ -258,7 +258,8 @@ void setMainDepth(int *values, int mainDepth) {
 				leds[band_it][mainDepth]);
 		if (leds[band_it][mainDepth] < 1) {
 			leds[band_it][mainDepth] = 1;
-		} else if (leds[band_it][mainDepth] > (16 << DECAYPRECISION) - 1) {
+		}
+		else if (leds[band_it][mainDepth] > (16 << DECAYPRECISION) - 1) {
 			leds[band_it][mainDepth] = (16 << DECAYPRECISION) - 1;
 		}
 	}
@@ -539,7 +540,7 @@ void chooseEffect() { //TODO: 2 choose effects
 	}
 }
 
-*/
+
 //imprime
 /*
 void adjustLayers()  //TODO :adjustlayers
@@ -945,8 +946,8 @@ void setup() {
 /*
  * mef.c
  *
- */
-/*
+ *
+
  #include "lcd.h"
  #include "derivative.h" /* include peripheral declarations
  #include "timer.h"
@@ -1062,3 +1063,4 @@ void setup() {
  RTCSC_RTIF = 1;
  }
 
+*/
